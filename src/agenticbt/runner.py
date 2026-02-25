@@ -97,12 +97,12 @@ class Runner:
         while engine.has_next():
             bar = engine.advance()
 
-            # 撮合上一轮提交的订单
-            fills = engine.match_orders(bar)
+            # 撮合上一轮提交的订单；Engine 自产事件，Runner 透传
+            engine.match_orders(bar)
+            engine_events = engine.drain_events()
             events = [
-                {"type": "fill", "symbol": f.symbol, "side": f.side,
-                 "quantity": f.quantity, "price": f.price}
-                for f in fills
+                {"type": e.type, "order_id": e.order_id, "symbol": e.symbol, **e.detail}
+                for e in engine_events
             ] + pending_events
             pending_events = []
 

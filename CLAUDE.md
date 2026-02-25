@@ -32,8 +32,10 @@ tests/ - BDD 测试 (14 文件: 7 features + 7 step definitions)
 |------|------|---------|
 | engine.py | 确定性市场模拟：数据回放、订单撮合、仓位核算、风控拦截 | docs/engine.md |
 | indicators.py | pandas-ta 防前瞻包装，calc(name, df, bar_index) | - |
+| engine.py | 确定性市场模拟：多资产数据/market+limit+stop+bracket 订单/多空/风控4检查/百分比滑点/部分成交 | docs/engine.md |
+| indicators.py | pandas-ta 防前瞻包装，calc(name, df, bar_index) | - |
 | memory.py | 文件式记忆：Workspace 隔离 + log/note/recall | docs/memory.md |
-| tools.py | ToolKit：OpenAI function calling schema + 分发 + 调用追踪 | docs/tools.md |
+| tools.py | ToolKit：OpenAI function calling schema + 分发 + 调用追踪；market_observe 支持 symbol | docs/tools.md |
 | agent.py | LLMAgent：ReAct loop（OpenAI SDK 兼容），AgentProtocol | docs/agent-protocol.md |
 | runner.py | Runner 主循环 + ContextManager 六层上下文组装 | docs/runner.md |
 | eval.py | Evaluator：绩效指标（真实 trade_log 盈亏）+ 遵循度报告 | docs/eval.md |
@@ -45,7 +47,7 @@ tests/ - BDD 测试 (14 文件: 7 features + 7 step definitions)
 # 安装
 python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
-# 全量测试（38 个 BDD scenarios）
+# 全量测试（67 个 BDD scenarios）
 .venv/bin/pytest tests/ -v
 
 # Mock demo（无需 API key，验证框架）
@@ -153,7 +155,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-MVP 完成：38/38 BDD scenarios 全绿
+仿真度升级完成：67/67 BDD scenarios 全绿（Phase 1-7）
 路线图：docs/roadmap.md
 
 # currentDate

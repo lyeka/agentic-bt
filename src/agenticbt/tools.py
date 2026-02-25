@@ -27,7 +27,12 @@ _SCHEMAS = [
             "description": "获取当前 bar 的市场行情",
             "parameters": {
                 "type": "object",
-                "properties": {},
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "指定查询的股票代码（默认主资产）",
+                    },
+                },
                 "required": [],
             },
         },
@@ -74,6 +79,28 @@ _SCHEMAS = [
                     },
                     "symbol": {"type": "string", "description": "股票代码"},
                     "quantity": {"type": "integer", "description": "数量（close 时可省略）"},
+                    "order_type": {
+                        "type": "string",
+                        "enum": ["market", "limit", "stop"],
+                        "default": "market",
+                        "description": "订单类型：market/limit/stop",
+                    },
+                    "price": {
+                        "type": "number",
+                        "description": "限价（limit）或止损触发价（stop）",
+                    },
+                    "valid_bars": {
+                        "type": "integer",
+                        "description": "订单有效 bar 数，省略则永久有效",
+                    },
+                    "stop_loss": {
+                        "type": "number",
+                        "description": "止损价（自动创建 Bracket，与 take_profit 配合）",
+                    },
+                    "take_profit": {
+                        "type": "number",
+                        "description": "止盈价（自动创建 Bracket，与 stop_loss 配合）",
+                    },
                 },
                 "required": ["action"],
             },
@@ -122,6 +149,32 @@ _SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "order_cancel",
+            "description": "取消指定的挂单",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "order_id": {"type": "string", "description": "要取消的订单 ID"},
+                },
+                "required": ["order_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "order_query",
+            "description": "查询当前所有待执行的挂单列表",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
 ]
 
 
@@ -167,14 +220,17 @@ class ToolKit:
             "memory_log": self._memory_log,
             "memory_note": self._memory_note,
             "memory_recall": self._memory_recall,
+            "order_cancel": self._order_cancel,
+            "order_query": self._order_query,
         }
         handler = handlers.get(name)
         if handler is None:
             return {"error": f"未知工具: {name}"}
         return handler(args)
 
-    def _market_observe(self, _args: dict) -> dict:
-        snap = self._engine.market_snapshot()
+    def _market_observe(self, args: dict) -> dict:
+        symbol = args.get("symbol")
+        snap = self._engine.market_snapshot(symbol)
         return {
             "datetime": snap.datetime.isoformat(),
             "symbol": snap.symbol,
@@ -209,14 +265,29 @@ class ToolKit:
     def _trade_execute(self, args: dict) -> dict:
         action = args.get("action", "hold")
         symbol = args.get("symbol", self._engine._symbol)
-        quantity = args.get("quantity")
+        quantity = args.get("quantity", 0)
+        order_type = args.get("order_type", "market")
+        price = args.get("price")
+        valid_bars = args.get("valid_bars")
+        stop_loss = args.get("stop_loss")
+        take_profit = args.get("take_profit")
 
         if action == "hold":
             result: dict = {"status": "hold"}
-        elif action == "buy":
-            result = self._engine.submit_buy(symbol, quantity or 0)
-        elif action == "sell":
-            result = self._engine.submit_sell(symbol, quantity or 0)
+        elif action in ("buy", "sell"):
+            if stop_loss is not None or take_profit is not None:
+                # Bracket 模式：忽略 order_type/price，直接用 stop_loss/take_profit
+                sl = stop_loss or 0.0
+                tp = take_profit or float("inf")
+                result = self._engine.submit_bracket(symbol, action, quantity, sl, tp)
+            else:
+                result = self._engine.submit_order(
+                    symbol, action, quantity,
+                    order_type=order_type,
+                    limit_price=price if order_type == "limit" else None,
+                    stop_price=price if order_type == "stop" else None,
+                    valid_bars=valid_bars,
+                )
         elif action == "close":
             result = self._engine.submit_close(symbol)
         else:
@@ -238,3 +309,9 @@ class ToolKit:
     def _memory_recall(self, args: dict) -> dict:
         results = self._memory.recall(args["query"])
         return {"results": results}
+
+    def _order_cancel(self, args: dict) -> dict:
+        return self._engine.cancel_order(args["order_id"])
+
+    def _order_query(self, _args: dict) -> dict:
+        return {"pending_orders": self._engine.pending_orders()}

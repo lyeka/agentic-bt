@@ -39,6 +39,18 @@ def test_no_trade_hold(): pass
 @scenario("features/tools.feature", "完整调用记录")
 def test_full_call_log(): pass
 
+@scenario("features/tools.feature", "分发 order_cancel")
+def test_order_cancel(): pass
+
+@scenario("features/tools.feature", "分发 order_query")
+def test_order_query(): pass
+
+@scenario("features/tools.feature", "trade_execute 提交限价买入")
+def test_limit_buy_via_tool(): pass
+
+@scenario("features/tools.feature", "trade_execute 提交 Bracket 买入")
+def test_bracket_via_tool(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Background fixture
@@ -104,6 +116,13 @@ def when_call_all_three(tctx):
     return tctx
 
 
+@when("调用 order_cancel 取消刚提交的订单", target_fixture="tctx")
+def when_cancel_last_order(tctx):
+    order_id = tctx["result"]["order_id"]
+    tctx["result"] = tctx["kit"].execute("order_cancel", {"order_id": order_id})
+    return tctx
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Then
 # ─────────────────────────────────────────────────────────────────────────────
@@ -164,3 +183,13 @@ def then_call_log_fields(tctx):
         assert tc.tool
         assert tc.input is not None
         assert tc.output is not None
+
+
+@then('order_cancel 应返回 status 为 "cancelled"')
+def then_cancel_status(tctx):
+    assert tctx["result"]["status"] == "cancelled"
+
+
+@then("应返回包含 pending_orders 的列表")
+def then_pending_orders_in_result(tctx):
+    assert "pending_orders" in tctx["result"]

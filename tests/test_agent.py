@@ -136,8 +136,19 @@ def when_decide(actx):
     context = {
         "datetime": datetime(2024, 1, 1),
         "bar_index": 0,
-        "market": {"close": 100.0},
-        "account": {"cash": 100_000.0},
+        "market": {
+            "symbol": "AAPL",
+            "open": 100.0,
+            "high": 101.0,
+            "low": 99.0,
+            "close": 100.0,
+            "volume": 1_000_000.0,
+        },
+        "account": {
+            "cash": 100_000.0,
+            "equity": 100_000.0,
+            "positions": {},
+        },
     }
     toolkit = actx["toolkit"]
     agent = actx["agent"]

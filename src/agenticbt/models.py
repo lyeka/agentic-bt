@@ -1,8 +1,8 @@
 """
 [INPUT]: dataclasses, datetime, typing, pandas
 [OUTPUT]: Bar, Order, Fill, Position, AccountSnapshot, MarketSnapshot,
-          BacktestConfig, Decision, ToolCall, BacktestResult, RiskConfig,
-          CommissionConfig, SlippageConfig
+          EngineEvent, BacktestConfig, Decision, ToolCall, BacktestResult,
+          RiskConfig, CommissionConfig, SlippageConfig
 [POS]: 所有模块的数据结构基础层，无业务逻辑，仅数据定义
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -61,6 +61,7 @@ class Order:
     stop_price: float | None = None
     order_id: str = ""
     bar_index: int = 0  # 提交时的 bar index
+    valid_bars: int | None = None  # None=永久有效, N=N 根 bar 后过期
 
 
 @dataclass
@@ -81,6 +82,17 @@ class RejectedOrder:
     """被风控拒绝的订单"""
     order: Order
     reason: str
+
+
+@dataclass
+class EngineEvent:
+    """Engine 状态变化产生的结构化事件（单向流：Engine → Runner → Agent Context）"""
+    type: str           # "fill" | "expired" | "cancelled"
+    bar_index: int
+    datetime: datetime
+    order_id: str
+    symbol: str
+    detail: dict[str, Any] = field(default_factory=dict)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,7 +147,10 @@ class CommissionConfig:
 @dataclass
 class SlippageConfig:
     """滑点配置"""
-    value: float = 0.0      # 固定滑点（价格单位）
+    value: float = 0.0          # 固定滑点（价格单位，向后兼容）
+    pct: float = 0.0            # 百分比滑点（0.01 = 1%）
+    mode: str = "fixed"         # "fixed" | "pct"
+    max_volume_pct: float = 1.0 # 单 bar 最大成交量占比（1.0 = 无约束）
 
 
 @dataclass

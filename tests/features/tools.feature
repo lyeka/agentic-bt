@@ -32,3 +32,21 @@ Feature: 工具桥接层
     When 依次调用 market_observe 和 indicator_calc RSI 和 trade_execute buy
     Then call_log 应有 3 条记录
     And 每条记录包含 tool input output
+
+  Scenario: 分发 order_cancel
+    When 调用工具 "trade_execute" 参数 {"action": "buy", "symbol": "AAPL", "quantity": 100}
+    And 调用 order_cancel 取消刚提交的订单
+    Then order_cancel 应返回 status 为 "cancelled"
+
+  Scenario: 分发 order_query
+    When 调用工具 "trade_execute" 参数 {"action": "buy", "symbol": "AAPL", "quantity": 100}
+    And 调用工具 "order_query" 参数 {}
+    Then 应返回包含 pending_orders 的列表
+
+  Scenario: trade_execute 提交限价买入
+    When 调用工具 "trade_execute" 参数 {"action": "buy", "symbol": "AAPL", "quantity": 100, "order_type": "limit", "price": 102.5}
+    Then 应返回包含 status 的结果
+
+  Scenario: trade_execute 提交 Bracket 买入
+    When 调用工具 "trade_execute" 参数 {"action": "buy", "symbol": "AAPL", "quantity": 10, "stop_loss": 100.0, "take_profit": 115.0}
+    Then 应返回包含 status 的结果
