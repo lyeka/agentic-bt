@@ -1,7 +1,7 @@
 """
 [INPUT]: agenticbt.engine, agenticbt.indicators, agenticbt.memory, agenticbt.models
-[OUTPUT]: ToolKit — 工具桥接层，提供 schemas/execute/call_log/indicator_queries/trade_actions
-[POS]: Agent 和 Engine/Memory 的中间层，OpenAI function calling 格式适配
+[OUTPUT]: ToolKit — 工具桥接层，提供 schemas/execute/call_log/indicator_queries/trade_actions；_TOOL_REMEDIATION — 错误提示常量
+[POS]: Agent 和 Engine/Memory 的中间层，OpenAI function calling 格式适配；execute() 带异常防御
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -13,6 +13,17 @@ from .engine import Engine
 from .indicators import IndicatorEngine
 from .memory import Memory
 from .models import ToolCall
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 工具错误提示（B2: remediation）
+# ─────────────────────────────────────────────────────────────────────────────
+
+_TOOL_REMEDIATION: dict[str, str] = {
+    "indicator_calc": "先调用 market_observe 确认 symbol，再调用 indicator_calc",
+    "trade_execute":  "先调用 account_status 确认余额，再调用 trade_execute",
+    "order_cancel":   "先调用 order_query 获取有效 order_id，再调用 order_cancel",
+}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -205,7 +216,15 @@ class ToolKit:
         return _SCHEMAS
 
     def execute(self, tool_name: str, args: dict[str, Any]) -> dict[str, Any]:
-        result = self._dispatch(tool_name, args)
+        # B2: 工具级异常防御 — 工具崩溃返回错误 dict，不中断 ReAct loop
+        try:
+            result = self._dispatch(tool_name, args)
+        except Exception as e:
+            result = {
+                "error": f"{type(e).__name__}: {e}",
+                "tool": tool_name,
+                "remediation": _TOOL_REMEDIATION.get(tool_name, "检查参数后重试"),
+            }
         self.call_log.append(ToolCall(tool=tool_name, input=args, output=result))
         return result
 
@@ -244,9 +263,15 @@ class ToolKit:
     def _indicator_calc(self, args: dict) -> dict:
         name = args["name"]
         period = args.get("period", 14)
+        # B4: 兼容单资产和多资产引擎，通过 _data_by_symbol 查找
+        symbol = args.get("symbol", self._engine._symbol)
         bar_index = self._engine._bar_index
-        df = self._engine._data.rename(columns={"date": "date"})  # noqa: simplify
-        # 确保列名统一为小写 open/high/low/close/volume
+        df = self._engine._data_by_symbol.get(symbol)
+        if df is None:
+            return {
+                "error": f"symbol {symbol!r} 不存在",
+                "remediation": "检查 symbol 名称是否正确",
+            }
         result = self._indicators.calc(name, df, bar_index, period=period)
         self.indicator_queries[name] = result
         return result
@@ -277,9 +302,14 @@ class ToolKit:
         elif action in ("buy", "sell"):
             if stop_loss is not None or take_profit is not None:
                 # Bracket 模式：忽略 order_type/price，直接用 stop_loss/take_profit
-                sl = stop_loss or 0.0
-                tp = take_profit or float("inf")
+                # B1: 用 is not None 而非 or，防止 0.0 被 falsy 误判
+                sl = stop_loss if stop_loss is not None else 0.0
+                tp = take_profit if take_profit is not None else float("inf")
                 result = self._engine.submit_bracket(symbol, action, quantity, sl, tp)
+                # O2: Bracket 覆盖提示，帮助 Agent 理解参数生效情况
+                if order_type != "market" or price is not None:
+                    result = dict(result)
+                    result["warning"] = "Bracket 模式：order_type/price 参数已忽略"
             else:
                 result = self._engine.submit_order(
                     symbol, action, quantity,

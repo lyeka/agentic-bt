@@ -1,7 +1,7 @@
 """
 [INPUT]: agenticbt.engine, agenticbt.memory, agenticbt.tools, agenticbt.models, agenticbt.eval
 [OUTPUT]: Runner — 回测主循环编排器；ContextManager — 上下文组装
-[POS]: 顶层编排器，连接 Engine/Memory/Agent/Eval，被用户直接调用
+[POS]: 顶层编排器，连接 Engine/Memory/Agent/Eval；_trigger_memory_moments() 在成交时写入记忆
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -119,6 +119,9 @@ class Runner:
             print(f"{decision.action:<5}  tokens={decision.tokens_used}", flush=True)
             decisions.append(decision)
 
+            # F1: 成交事件驱动记忆写入
+            self._trigger_memory_moments(memory, events, engine._bar_index, bar_dt)
+
             # 持久化决策
             self._record_decision(ws, decision)
 
@@ -142,6 +145,21 @@ class Runner:
 
         self._save_result(ws, result)
         return result
+
+    def _trigger_memory_moments(
+        self,
+        memory: Memory,
+        events: list[dict],
+        bar_index: int,
+        bar_dt: str,
+    ) -> None:
+        """F1: 成交事件自动写入记忆日志，帮助 Agent 从历史成交中学习"""
+        for e in events:
+            if e["type"] == "fill":
+                memory.log(
+                    f"[bar={bar_index} {bar_dt}] "
+                    f"成交: {e['side']} {e['symbol']} {e['quantity']}股 @ {e['price']:.2f}"
+                )
 
     def _record_decision(self, ws: Workspace, decision: Decision) -> None:
         jsonl_path = ws.root / "decisions.jsonl"

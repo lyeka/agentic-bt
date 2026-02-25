@@ -36,6 +36,9 @@ def test_context_playbook(): pass
 @scenario("features/runner.feature", "工作空间保存完整")
 def test_workspace_saved(): pass
 
+@scenario("features/runner.feature", "成交事件触发 memory.log 写入")
+def test_fill_triggers_memory(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -209,3 +212,17 @@ def then_has_decisions(rctx):
 def then_has_result_json(rctx):
     ws = rctx["result"].workspace_path
     assert os.path.isfile(os.path.join(ws, "result.json"))
+
+
+@then("memory 日志应包含成交记录")
+def then_memory_has_fill_log(rctx):
+    """F1: 成交后 _trigger_memory_moments() 应向 journal 写入成交记录"""
+    ws_path = rctx["result"].workspace_path
+    journal_dir = os.path.join(ws_path, "journal")
+    all_content = ""
+    if os.path.isdir(journal_dir):
+        for fname in os.listdir(journal_dir):
+            fpath = os.path.join(journal_dir, fname)
+            with open(fpath, encoding="utf-8") as f:
+                all_content += f.read()
+    assert "成交" in all_content, f"Memory 日志未包含成交记录，日志:\n{all_content}"

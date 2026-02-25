@@ -1,7 +1,7 @@
 """
 [INPUT]: openai, agenticbt.models, agenticbt.tools
-[OUTPUT]: LLMAgent — ReAct loop 实现；AgentProtocol — 接口定义
-[POS]: Agent 层，唯一直接调用 LLM API 的组件，被 runner 驱动
+[OUTPUT]: LLMAgent — ReAct loop 实现（含指数退避重试）；AgentProtocol — 接口定义
+[POS]: Agent 层，唯一直接调用 LLM API 的组件，被 runner 驱动；_call_llm() 封装重试逻辑
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -67,15 +67,9 @@ class LLMAgent:
         total_tokens = 0
 
         for _ in range(self.max_rounds):
-            try:
-                response = self.client.chat.completions.create(
-                    model=self.model,
-                    messages=messages,
-                    tools=toolkit.schemas,
-                    temperature=self._temperature,
-                )
-            except Exception as e:
-                print(f"  [LLM ERROR] {type(e).__name__}: {e}", flush=True)
+            # B3: 使用带重试的 LLM 调用
+            response = self._call_llm(messages, toolkit.schemas)
+            if response is None:
                 break
             choice = response.choices[0]
             total_tokens += response.usage.total_tokens if response.usage else 0
@@ -102,6 +96,25 @@ class LLMAgent:
 
         latency_ms = (time.time() - t0) * 1000
         return self._build_decision(context, toolkit, final_text, total_tokens, latency_ms)
+
+    def _call_llm(self, messages: list, tools: list) -> object | None:
+        """B3: 带指数退避的 LLM 调用，失败 3 次后返回 None"""
+        for attempt in range(3):
+            try:
+                return self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=tools,
+                    temperature=self._temperature,
+                )
+            except Exception as e:
+                if attempt == 2:
+                    print(f"  [LLM FATAL] {type(e).__name__}: {e}", flush=True)
+                    return None
+                wait = 2 ** attempt
+                print(f"  [LLM RETRY {attempt + 1}] {type(e).__name__}, wait {wait}s", flush=True)
+                time.sleep(wait)
+        return None  # unreachable
 
     def _format_context(self, context: dict) -> str:
         m = context["market"]
@@ -134,13 +147,20 @@ class LLMAgent:
         tokens: int,
         latency_ms: float,
     ) -> Decision:
-        # 从 trade_actions 中提取最后一次交易动作
-        action, symbol, quantity = "hold", None, None
+        # F2: 提取最后一次交易动作，填充 order_result；多笔交易补充完整链到 reasoning
+        action, symbol, quantity, order_result = "hold", None, None, None
         if toolkit.trade_actions:
             last = toolkit.trade_actions[-1]
-            action = last["action"]
-            symbol = last.get("symbol")
-            quantity = last.get("quantity")
+            action       = last["action"]
+            symbol       = last.get("symbol")
+            quantity     = last.get("quantity")
+            order_result = last.get("result")
+            if len(toolkit.trade_actions) > 1:
+                summary = "; ".join(
+                    f"{t['action']} {t.get('symbol', '?')} {t.get('quantity', '?')}股"
+                    for t in toolkit.trade_actions
+                )
+                reasoning = reasoning + f"\n[全部交易: {summary}]"
 
         return Decision(
             datetime=context.get("datetime", datetime.now()),
@@ -153,6 +173,7 @@ class LLMAgent:
             account_snapshot=context.get("account", {}),
             indicators_used=dict(toolkit.indicator_queries),
             tool_calls=list(toolkit.call_log),
+            order_result=order_result,
             model=self.model,
             tokens_used=tokens,
             latency_ms=latency_ms,

@@ -50,3 +50,19 @@ Feature: 工具桥接层
   Scenario: trade_execute 提交 Bracket 买入
     When 调用工具 "trade_execute" 参数 {"action": "buy", "symbol": "AAPL", "quantity": 10, "stop_loss": 100.0, "take_profit": 115.0}
     Then 应返回包含 status 的结果
+
+  Scenario: Bracket 止损价为 0.0 时正确传入引擎
+    When 调用工具 "trade_execute" 参数 {"action": "buy", "symbol": "AAPL", "quantity": 10, "stop_loss": 0.0, "take_profit": 115.0}
+    Then 应返回包含 status 的结果
+    And 不因 stop_loss 为 0.0 而报错
+
+  Scenario: 工具内部异常时返回错误字典而不崩溃
+    When ToolKit 执行一个会抛出异常的工具调用
+    Then 应返回包含 error 字段的字典
+    And call_log 记录本次失败调用
+
+  Scenario: 多资产引擎中指标计算正确绑定 symbol
+    Given 多资产引擎和记忆系统
+    When 调用工具 "indicator_calc" 参数 {"name": "RSI", "symbol": "MSFT"}
+    Then 应返回包含 value 的指标结果
+    And 不因 symbol 错误而报错

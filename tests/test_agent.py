@@ -40,6 +40,9 @@ def test_max_rounds(): pass
 @scenario("features/agent.feature", "Decision 记录完整审计信息")
 def test_decision_audit(): pass
 
+@scenario("features/agent.feature", "LLM API 异常时重试后返回 hold")
+def test_llm_retry_on_error(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -121,6 +124,17 @@ def given_agent_infinite():
     return {"agent": agent, "toolkit": toolkit, "make_response": make_response}
 
 
+@given("一个持续抛出异常的 mock LLM 客户端", target_fixture="actx")
+def given_failing_llm():
+    """B3: 模拟 LLM API 持续失败，验证重试后降级为 hold"""
+    def always_fail(**_):
+        raise ConnectionError("模拟网络中断")
+
+    toolkit = _make_toolkit()
+    agent = LLMAgent(max_rounds=5)
+    return {"agent": agent, "toolkit": toolkit, "make_response": always_fail}
+
+
 @given(parsers.parse("max_rounds 设为 {n:d}"), target_fixture="actx")
 def given_max_rounds(actx, n):
     actx["agent"].max_rounds = n
@@ -162,7 +176,9 @@ def when_decide(actx):
     else:
         mock_create = MagicMock(side_effect=make_response)
 
-    with patch.object(agent.client.chat.completions, "create", mock_create):
+    # B3: mock time.sleep 让重试测试不阻塞
+    with patch.object(agent.client.chat.completions, "create", mock_create), \
+         patch("agenticbt.agent.time.sleep"):
         actx["decision"] = agent.decide(context, toolkit)
 
     return actx
@@ -217,3 +233,9 @@ def then_has_tokens(actx):
 @then("decision 应包含 latency_ms")
 def then_has_latency(actx):
     assert actx["decision"].latency_ms >= 0
+
+
+@then("不抛出异常")
+def then_no_exception(actx):
+    """B3: LLM 全部失败后，decide() 仍正常返回 Decision 对象"""
+    assert actx["decision"] is not None

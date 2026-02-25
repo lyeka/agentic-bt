@@ -30,3 +30,9 @@ Feature: 回测编排
     Then workspace 应包含 playbook.md
     And workspace 应包含 decisions.jsonl
     And workspace 应包含 result.json
+
+  Scenario: 成交事件触发 memory.log 写入
+    Given 3 根 bar 的测试数据
+    And 一个 mock Agent 在 bar 0 买入 在 bar 1 卖出
+    When 执行回测
+    Then memory 日志应包含成交记录

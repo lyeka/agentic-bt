@@ -6,7 +6,9 @@
 """
 
 import json
+from unittest.mock import patch
 
+import numpy as np
 import pandas as pd
 import pytest
 from pytest_bdd import given, parsers, scenario, then, when
@@ -51,6 +53,15 @@ def test_limit_buy_via_tool(): pass
 @scenario("features/tools.feature", "trade_execute 提交 Bracket 买入")
 def test_bracket_via_tool(): pass
 
+@scenario("features/tools.feature", "Bracket 止损价为 0.0 时正确传入引擎")
+def test_bracket_zero_stop_loss(): pass
+
+@scenario("features/tools.feature", "工具内部异常时返回错误字典而不崩溃")
+def test_tool_exception_returns_error(): pass
+
+@scenario("features/tools.feature", "多资产引擎中指标计算正确绑定 symbol")
+def test_multi_asset_indicator(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Background fixture
@@ -78,6 +89,33 @@ def _make_engine() -> Engine:
 @given("一个已初始化的引擎和记忆系统", target_fixture="tctx")
 def given_engine_memory():
     eng = _make_engine()
+    ws = Workspace()
+    mem = Memory(ws)
+    toolkit = ToolKit(engine=eng, memory=mem)
+    return {"eng": eng, "mem": mem, "kit": toolkit}
+
+
+@given("多资产引擎和记忆系统", target_fixture="tctx")
+def given_multi_asset_engine_memory():
+    """B4: 多资产引擎 fixture，data 为 dict[str, DataFrame]"""
+    rng = np.random.default_rng(0)
+    n = 30
+
+    def make_df():
+        close = 100.0 + np.cumsum(rng.normal(0, 1, n))
+        return pd.DataFrame({
+            "date":   pd.date_range("2024-01-01", periods=n),
+            "open":   close + rng.normal(0, 0.5, n),
+            "high":   close + rng.uniform(0.5, 2, n),
+            "low":    close - rng.uniform(0.5, 2, n),
+            "close":  close,
+            "volume": rng.integers(500_000, 2_000_000, n).astype(float),
+        })
+
+    data = {"AAPL": make_df(), "MSFT": make_df()}
+    eng = Engine(data=data, symbol="AAPL", initial_cash=100_000.0,
+                 risk=RiskConfig(max_position_pct=1.0))
+    eng.advance()
     ws = Workspace()
     mem = Memory(ws)
     toolkit = ToolKit(engine=eng, memory=mem)
@@ -120,6 +158,14 @@ def when_call_all_three(tctx):
 def when_cancel_last_order(tctx):
     order_id = tctx["result"]["order_id"]
     tctx["result"] = tctx["kit"].execute("order_cancel", {"order_id": order_id})
+    return tctx
+
+
+@when("ToolKit 执行一个会抛出异常的工具调用", target_fixture="tctx")
+def when_execute_failing_tool(tctx):
+    """B2: 用 patch 让 _market_observe 抛出异常，验证 execute() 捕获"""
+    with patch.object(tctx["kit"], "_market_observe", side_effect=RuntimeError("模拟崩溃")):
+        tctx["result"] = tctx["kit"].execute("market_observe", {})
     return tctx
 
 
@@ -193,3 +239,32 @@ def then_cancel_status(tctx):
 @then("应返回包含 pending_orders 的列表")
 def then_pending_orders_in_result(tctx):
     assert "pending_orders" in tctx["result"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 新增 Then（B1/B2/B4）
+# ─────────────────────────────────────────────────────────────────────────────
+
+@then("不因 stop_loss 为 0.0 而报错")
+def then_no_error_for_zero_stop_loss(tctx):
+    """B1: stop_loss=0.0 不应被 falsy 误判，结果应为 submitted"""
+    assert "error" not in tctx["result"]
+
+
+@then("应返回包含 error 字段的字典")
+def then_has_error_field(tctx):
+    """B2: 工具崩溃后 execute() 返回含 error 的 dict"""
+    assert "error" in tctx["result"]
+
+
+@then("call_log 记录本次失败调用")
+def then_failed_call_in_log(tctx):
+    """B2: 即使崩溃，call_log 也应追加记录"""
+    assert len(tctx["kit"].call_log) > 0
+    assert "error" in tctx["kit"].call_log[-1].output
+
+
+@then("不因 symbol 错误而报错")
+def then_no_symbol_error(tctx):
+    """B4: 多资产引擎中，存在的 symbol 不应返回 error"""
+    assert "error" not in tctx["result"]

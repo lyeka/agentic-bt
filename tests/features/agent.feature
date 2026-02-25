@@ -30,3 +30,9 @@ Feature: LLM Agent 交易决策
     And decision 应包含 account_snapshot
     And decision 应包含 tokens_used
     And decision 应包含 latency_ms
+
+  Scenario: LLM API 异常时重试后返回 hold
+    Given 一个持续抛出异常的 mock LLM 客户端
+    When Agent 做出决策
+    Then decision.action 应为 "hold"
+    And 不抛出异常
