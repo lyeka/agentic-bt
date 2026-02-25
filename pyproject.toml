@@ -1,0 +1,26 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "agenticbt"
+version = "0.1.0"
+description = "Agent 时代的量化回测框架 — Backtest the Trader, Not Just the Strategy"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.0",
+    "pandas>=2.0",
+    "pandas-ta",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-bdd>=7.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agenticbt"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

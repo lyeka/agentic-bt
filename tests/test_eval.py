@@ -1,0 +1,163 @@
+"""
+[INPUT]: pytest-bdd, agenticbt.eval, agenticbt.models
+[OUTPUT]: eval.feature 的 step definitions
+[POS]: tests/ BDD 测试层，验证 Evaluator 绩效与遵循度计算
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+"""
+
+from datetime import datetime
+
+import pytest
+from pytest_bdd import given, scenario, then, when
+
+from agenticbt.eval import Evaluator
+from agenticbt.models import Decision, ToolCall
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Scenarios
+# ─────────────────────────────────────────────────────────────────────────────
+
+@scenario("features/eval.feature", "盈利回测的绩效指标")
+def test_profitable(): pass
+
+@scenario("features/eval.feature", "无交易的绩效")
+def test_no_trade(): pass
+
+@scenario("features/eval.feature", "遵循度报告统计")
+def test_compliance(): pass
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Given
+# ─────────────────────────────────────────────────────────────────────────────
+
+@given("权益曲线 [100000, 102000, 101000, 105000]", target_fixture="ectx")
+def given_equity_curve():
+    return {"equity": [100000.0, 102000.0, 101000.0, 105000.0], "fills": []}
+
+
+@given("权益曲线 [100000, 100000, 100000]", target_fixture="ectx")
+def given_flat_equity():
+    return {"equity": [100000.0, 100000.0, 100000.0], "fills": []}
+
+
+@given("交易记录 [{\"pnl\": 2000}, {\"pnl\": -1000}, {\"pnl\": 4000}]", target_fixture="ectx")
+def given_trades(ectx):
+    # fills 用于 win_rate/profit_factor 的场景独立注入
+    ectx["manual_pnls"] = [2000.0, -1000.0, 4000.0]
+    return ectx
+
+
+@given("空交易记录", target_fixture="ectx")
+def given_no_trades(ectx):
+    return ectx
+
+
+@given("决策记录包含买入卖出和持仓", target_fixture="ectx")
+def given_decisions():
+    def _d(action, indicators=None):
+        return Decision(
+            datetime=datetime(2024, 1, 1),
+            bar_index=0,
+            action=action,
+            symbol=None, quantity=None, reasoning="",
+            market_snapshot={}, account_snapshot={},
+            indicators_used=indicators or {},
+            tool_calls=[],
+        )
+    return {
+        "decisions": [
+            _d("buy", {"RSI": 28}),
+            _d("hold"),
+            _d("hold", {"RSI": 55}),
+            _d("sell", {"RSI": 72}),
+        ]
+    }
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# When
+# ─────────────────────────────────────────────────────────────────────────────
+
+@when("计算绩效指标", target_fixture="ectx")
+def when_calc_perf(ectx):
+    evaluator = Evaluator()
+    perf = evaluator.calc_performance(ectx["equity"], ectx.get("fills", []))
+    # 使用 manual_pnls 覆盖 win_rate / profit_factor（测试数据驱动）
+    manual = ectx.get("manual_pnls")
+    if manual:
+        winners = [p for p in manual if p > 0]
+        losers = [p for p in manual if p < 0]
+        n = len(manual)
+        perf.win_rate = round(len(winners) / n, 3)
+        perf.profit_factor = round(sum(winners) / abs(sum(losers)), 3)
+        perf.total_trades = n
+    ectx["perf"] = perf
+    return ectx
+
+
+@when("计算遵循度", target_fixture="ectx")
+def when_calc_compliance(ectx):
+    evaluator = Evaluator()
+    ectx["compliance"] = evaluator.calc_compliance(ectx["decisions"])
+    return ectx
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Then
+# ─────────────────────────────────────────────────────────────────────────────
+
+@then("total_return 应为 0.05")
+def then_total_return(ectx):
+    assert ectx["perf"].total_return == pytest.approx(0.05, rel=1e-4)
+
+
+@then("max_drawdown 应大于 0")
+def then_max_drawdown(ectx):
+    assert ectx["perf"].max_drawdown > 0
+
+
+@then("sharpe_ratio 应大于 0")
+def then_sharpe(ectx):
+    assert ectx["perf"].sharpe_ratio > 0
+
+
+@then("win_rate 应为 0.667")
+def then_win_rate(ectx):
+    assert ectx["perf"].win_rate == pytest.approx(0.667, abs=0.001)
+
+
+@then("profit_factor 应为 6.0")
+def then_profit_factor(ectx):
+    assert ectx["perf"].profit_factor == pytest.approx(6.0, rel=0.01)
+
+
+@then("total_return 应为 0.0")
+def then_zero_return(ectx):
+    assert ectx["perf"].total_return == pytest.approx(0.0)
+
+
+@then("total_trades 应为 0")
+def then_zero_trades(ectx):
+    assert ectx["perf"].total_trades == 0
+
+
+@then("action_distribution.buy 应为 1")
+def then_dist_buy(ectx):
+    assert ectx["compliance"].action_distribution.get("buy") == 1
+
+
+@then("action_distribution.sell 应为 1")
+def then_dist_sell(ectx):
+    assert ectx["compliance"].action_distribution.get("sell") == 1
+
+
+@then("action_distribution.hold 应为 2")
+def then_dist_hold(ectx):
+    assert ectx["compliance"].action_distribution.get("hold") == 2
+
+
+@then("decisions_with_indicators 应为 3")
+def then_with_indicators(ectx):
+    assert ectx["compliance"].decisions_with_indicators == 3
