@@ -62,6 +62,12 @@ def test_tool_exception_returns_error(): pass
 @scenario("features/tools.feature", "多资产引擎中指标计算正确绑定 symbol")
 def test_multi_asset_indicator(): pass
 
+@scenario("features/tools.feature", "通过 market_history 获取任意长度的历史 K 线")
+def test_market_history(): pass
+
+@scenario("features/tools.feature", "market_history 请求超出可用范围时返回所有可用的")
+def test_market_history_truncated(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Background fixture
@@ -268,3 +274,66 @@ def then_failed_call_in_log(tctx):
 def then_no_symbol_error(tctx):
     """B4: 多资产引擎中，存在的 symbol 不应返回 error"""
     assert "error" not in tctx["result"]
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# market_history scenario steps
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _make_engine_n(n: int) -> Engine:
+    import numpy as np
+    rng = np.random.default_rng(0)
+    close = 100.0 + np.cumsum(rng.normal(0, 1, n))
+    df = pd.DataFrame({
+        "date": pd.date_range("2024-01-01", periods=n),
+        "open": close + rng.normal(0, 0.5, n),
+        "high": close + rng.uniform(0.5, 2, n),
+        "low": close - rng.uniform(0.5, 2, n),
+        "close": close,
+        "volume": rng.integers(500_000, 2_000_000, n).astype(float),
+    })
+    from agenticbt.models import RiskConfig
+    return Engine(data=df, symbol="AAPL", initial_cash=100_000.0,
+                  risk=RiskConfig(max_position_pct=1.0))
+
+
+@given(parsers.parse("初始资金 100000 和 {n:d} 根 bar 的引擎"), target_fixture="tctx")
+def given_engine_n_bars_tools(n):
+    eng = _make_engine_n(n)
+    ws = Workspace()
+    mem = Memory(ws)
+    toolkit = ToolKit(engine=eng, memory=mem)
+    return {"eng": eng, "mem": mem, "kit": toolkit}
+
+
+@when(parsers.parse("推进到第 {n:d} 根 bar"), target_fixture="tctx")
+def when_advance_to_n_tools(tctx, n):
+    eng = tctx["eng"]
+    while eng._bar_index < n:
+        eng.advance()
+    return tctx
+
+
+@when(parsers.parse("调用 market_history 获取最近 {n:d} 根 bar"), target_fixture="tctx")
+def when_call_market_history(tctx, n):
+    tctx["result"] = tctx["kit"].execute("market_history", {"bars": n})
+    return tctx
+
+
+@then(parsers.parse("应返回 {n:d} 条完整 OHLCV 记录"))
+def then_history_n_records(tctx, n):
+    result = tctx["result"]
+    assert "history" in result, f"result has no 'history': {result}"
+    hist = result["history"]
+    assert len(hist) == n, f"expected {n}, got {len(hist)}"
+    # 验证 OHLCV 字段完整
+    for rec in hist:
+        for field in ["open", "high", "low", "close", "volume"]:
+            assert field in rec, f"missing field '{field}'"
+
+
+@then(parsers.parse("应返回 {n:d} 条记录"))
+def then_history_exactly_n_records(tctx, n):
+    result = tctx["result"]
+    assert "history" in result, f"result has no 'history': {result}"
+    assert len(result["history"]) == n, f"expected {n}, got {len(result['history'])}"

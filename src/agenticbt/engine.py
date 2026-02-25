@@ -185,6 +185,42 @@ class Engine:
             for o in self._pending_orders
         ]
 
+    def recent_bars(self, n: int = 5, symbol: str | None = None) -> list[dict[str, Any]]:
+        """最近 N 根 K 线摘要（含当前 bar），供 Context 静态注入"""
+        sym = symbol or self._symbol
+        data = self._data_by_symbol.get(sym, self._data)
+        start = max(0, self._bar_index - n + 1)
+        return [
+            {
+                "bar_index": i,
+                "close": float(data.iloc[i]["close"]),
+                "volume": float(data.iloc[i]["volume"]),
+            }
+            for i in range(start, self._bar_index + 1)
+        ]
+
+    def market_history(self, n: int, symbol: str | None = None) -> list[dict[str, Any]]:
+        """返回最近 N 根 K 线的完整 OHLCV，供 Agent 动态查询"""
+        sym = symbol or self._symbol
+        data = self._data_by_symbol.get(sym, self._data)
+        start = max(0, self._bar_index - n + 1)
+        result = []
+        for i in range(start, self._bar_index + 1):
+            row = data.iloc[i]
+            dt = row.get("date") or row.get("Date") or row.get("datetime") or row.get("index")
+            if dt is None:
+                dt = data.index[i]
+            result.append({
+                "bar_index": i,
+                "datetime": str(dt),
+                "open": float(row["open"]),
+                "high": float(row["high"]),
+                "low": float(row["low"]),
+                "close": float(row["close"]),
+                "volume": float(row["volume"]),
+            })
+        return result
+
     # ── 订单提交 ──────────────────────────────────────────────────────────────
 
     def submit_order(

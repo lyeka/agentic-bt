@@ -22,8 +22,8 @@ pyproject.toml - Python 包配置（venv: .venv/）
 
 <directory>
 docs/ - 完整设计文档集 (9 文件: architecture, engine, tools, memory, context, eval, agent-protocol, runner, roadmap)
-src/agenticbt/ - 核心业务代码 (10 文件: __init__, models, engine, indicators, memory, tools, agent, runner, eval, data)
-tests/ - BDD 测试 (14 文件: 7 features + 7 step definitions)
+src/agenticbt/ - 核心业务代码 (11 文件: __init__, models, engine, indicators, memory, tools, context, agent, runner, eval, data)
+tests/ - BDD 测试 (16 文件: 8 features + 8 step definitions)
 </directory>
 
 ## 核心模块
@@ -37,7 +37,8 @@ tests/ - BDD 测试 (14 文件: 7 features + 7 step definitions)
 | memory.py | 文件式记忆：Workspace 隔离 + log/note/recall | docs/memory.md |
 | tools.py | ToolKit：OpenAI function calling schema + 分发 + 调用追踪；market_observe 支持 symbol | docs/tools.md |
 | agent.py | LLMAgent：ReAct loop（OpenAI SDK 兼容），AgentProtocol | docs/agent-protocol.md |
-| runner.py | Runner 主循环 + ContextManager 六层上下文组装 | docs/runner.md |
+| runner.py | Runner 主循环；集成 ContextManager，传入决策历史组装近期决策 | docs/runner.md |
+| context.py | ContextManager：五层认知上下文组装（recent_bars/pending_orders/recent_decisions）+ LLM 文本格式化 | docs/context.md |
 | eval.py | Evaluator：绩效指标（真实 trade_log 盈亏）+ 遵循度报告 | docs/eval.md |
 | data.py | load_csv 标准化加载 + make_sample_data 模拟数据生成 | - |
 
@@ -155,7 +156,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-仿真度升级完成：67/67 BDD scenarios 全绿（Phase 1-7）
+仿真度升级完成：86/86 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构）
 路线图：docs/roadmap.md
 
 # currentDate

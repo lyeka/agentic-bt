@@ -14,7 +14,7 @@ from typing import Protocol, runtime_checkable
 
 import openai
 
-from .models import Decision, ToolCall
+from .models import Context, Decision, ToolCall
 from .tools import ToolKit
 
 
@@ -24,7 +24,7 @@ from .tools import ToolKit
 
 @runtime_checkable
 class AgentProtocol(Protocol):
-    def decide(self, context: dict, toolkit: ToolKit) -> Decision:
+    def decide(self, context: Context, toolkit: ToolKit) -> Decision:
         """核心决策方法：给定上下文和工具包，返回决策记录"""
         ...
 
@@ -45,7 +45,7 @@ class LLMAgent:
         model: str = "claude-sonnet-4-20250514",
         base_url: str | None = None,
         api_key: str | None = None,
-        max_rounds: int = 5,
+        max_rounds: int = 15,
         temperature: float = 0.0,
     ) -> None:
         self.model = model
@@ -56,12 +56,12 @@ class LLMAgent:
         )
         self._temperature = temperature
 
-    def decide(self, context: dict, toolkit: ToolKit) -> Decision:
+    def decide(self, context: Context, toolkit: ToolKit) -> Decision:
         """ReAct loop：工具调用 → 继续，stop → 终止"""
         t0 = time.time()
         messages = [
-            {"role": "system", "content": context.get("playbook", "")},
-            {"role": "user",   "content": self._format_context(context)},
+            {"role": "system", "content": context.playbook},
+            {"role": "user",   "content": context.formatted_text},
         ]
         final_text = ""
         total_tokens = 0
@@ -116,32 +116,9 @@ class LLMAgent:
                 time.sleep(wait)
         return None  # unreachable
 
-    def _format_context(self, context: dict) -> str:
-        m = context["market"]
-        a = context["account"]
-        positions = ", ".join(
-            f"{sym} {p['size']}股@{p['avg_price']:.2f}"
-            for sym, p in a["positions"].items()
-        ) or "空仓"
-
-        lines = [
-            f"## 当前行情  [{context['datetime']}  bar={context['bar_index']}]",
-            f"  {m['symbol']}  开={m['open']}  高={m['high']}  低={m['low']}  收={m['close']}  量={m['volume']:.0f}",
-            f"## 账户",
-            f"  现金={a['cash']:.0f}  净值={a['equity']:.0f}  持仓: {positions}",
-        ]
-        if context.get("events"):
-            lines.append("## 成交事件")
-            for e in context["events"]:
-                lines.append(f"  {e['side']} {e['symbol']} {e['quantity']}股 @ {e['price']:.2f}")
-        if context.get("position_notes"):
-            lines.append(f"## 持仓备注\n  {context['position_notes']}")
-        lines.append("\n请先调用工具获取数据，再给出交易决策。")
-        return "\n".join(lines)
-
     def _build_decision(
         self,
-        context: dict,
+        context: Context,
         toolkit: ToolKit,
         reasoning: str,
         tokens: int,
@@ -163,14 +140,14 @@ class LLMAgent:
                 reasoning = reasoning + f"\n[全部交易: {summary}]"
 
         return Decision(
-            datetime=context.get("datetime", datetime.now()),
-            bar_index=context.get("bar_index", 0),
+            datetime=context.datetime,
+            bar_index=context.bar_index,
             action=action,
             symbol=symbol,
             quantity=quantity,
             reasoning=reasoning,
-            market_snapshot=context.get("market", {}),
-            account_snapshot=context.get("account", {}),
+            market_snapshot=context.market,
+            account_snapshot=context.account,
             indicators_used=dict(toolkit.indicator_queries),
             tool_calls=list(toolkit.call_log),
             order_result=order_result,
@@ -178,3 +155,4 @@ class LLMAgent:
             tokens_used=tokens,
             latency_ms=latency_ms,
         )
+

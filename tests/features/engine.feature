@@ -246,3 +246,9 @@ Feature: 确定性市场模拟引擎
     And 引擎推进到 bar 1 并撮合订单
     And 引擎推进到 bar 2 并撮合订单
     Then 持仓 "AAPL" 应为 2100 股
+
+  Scenario: 查询最近 N 根 K 线
+    Given 初始资金 100000 和 30 根 bar 数据
+    When 推进到第 25 根 bar
+    And 查询最近 20 根 bar
+    Then 应返回 20 条记录且 bar_index 从 6 到 25

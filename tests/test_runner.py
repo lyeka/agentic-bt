@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 from pytest_bdd import given, parsers, scenario, then, when
 
-from agenticbt.models import BacktestConfig, Decision, RiskConfig, ToolCall
+from agenticbt.models import BacktestConfig, Context, Decision, RiskConfig, ToolCall
 from agenticbt.runner import Runner
 from agenticbt.tools import ToolKit
 
@@ -55,14 +55,14 @@ def _make_df(n: int = 3) -> pd.DataFrame:
     })
 
 
-def _hold_decision(context: dict, toolkit: ToolKit) -> Decision:
+def _hold_decision(context: Context, toolkit: ToolKit) -> Decision:
     """永远 hold 的 mock agent"""
     return Decision(
-        datetime=context.get("datetime", datetime.now()),
-        bar_index=context.get("bar_index", 0),
+        datetime=context.datetime,
+        bar_index=context.bar_index,
         action="hold", symbol=None, quantity=None, reasoning="hold",
-        market_snapshot=context.get("market", {}),
-        account_snapshot=context.get("account", {}),
+        market_snapshot=context.market,
+        account_snapshot=context.account,
         indicators_used={}, tool_calls=[],
     )
 
@@ -91,8 +91,8 @@ def given_hold_agent(rctx):
 def given_buy_sell_agent(rctx):
     call_count = {"n": 0}
 
-    def decide(context: dict, toolkit: ToolKit) -> Decision:
-        idx = context.get("bar_index", 0)
+    def decide(context: Context, toolkit: ToolKit) -> Decision:
+        idx = context.bar_index
         if idx == 0:
             toolkit.execute("trade_execute", {"action": "buy", "symbol": "AAPL", "quantity": 10})
             action, symbol, qty = "buy", "AAPL", 10
@@ -103,12 +103,12 @@ def given_buy_sell_agent(rctx):
             action, symbol, qty = "hold", None, None
 
         return Decision(
-            datetime=context.get("datetime", datetime.now()),
+            datetime=context.datetime,
             bar_index=idx,
             action=action, symbol=symbol, quantity=qty,
             reasoning="test",
-            market_snapshot=context.get("market", {}),
-            account_snapshot=context.get("account", {}),
+            market_snapshot=context.market,
+            account_snapshot=context.account,
             indicators_used={}, tool_calls=list(toolkit.call_log),
         )
 
@@ -126,7 +126,7 @@ def given_strategy(rctx, desc):
 def given_context_recorder(rctx):
     recorded = []
 
-    def decide(context: dict, toolkit: ToolKit) -> Decision:
+    def decide(context: Context, toolkit: ToolKit) -> Decision:
         recorded.append(context)
         return _hold_decision(context, toolkit)
 
@@ -193,7 +193,7 @@ def then_context_has_playbook(rctx, text):
     recorded = rctx.get("recorded_contexts", [])
     assert len(recorded) > 0
     for ctx in recorded:
-        assert text in ctx.get("playbook", "")
+        assert text in ctx.playbook
 
 
 @then("workspace 应包含 playbook.md")

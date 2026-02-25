@@ -2,7 +2,8 @@
 [INPUT]: dataclasses, datetime, typing, pandas
 [OUTPUT]: Bar, Order, Fill, Position, AccountSnapshot, MarketSnapshot,
           EngineEvent, BacktestConfig, Decision, ToolCall, BacktestResult,
-          RiskConfig, CommissionConfig, SlippageConfig
+          RiskConfig, CommissionConfig, SlippageConfig,
+          ContextConfig, Context
 [POS]: 所有模块的数据结构基础层，无业务逻辑，仅数据定义
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -167,6 +168,41 @@ class BacktestConfig:
     commission: CommissionConfig = field(default_factory=CommissionConfig)
     slippage: SlippageConfig = field(default_factory=SlippageConfig)
     max_agent_rounds: int = 5       # ReAct loop 最大轮次
+    context_config: "ContextConfig" = field(default_factory=lambda: ContextConfig())
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 上下文层
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class ContextConfig:
+    """上下文组装配置 — 窗口大小和截断阈值"""
+    recent_bars_window: int = 20        # 静态注入的 K 线窗口
+    recent_decisions_window: int = 3
+    reasoning_max_chars: int = 80
+
+
+@dataclass
+class Context:
+    """Agent 决策的完整上下文 — 五层认知注入的结构化承载"""
+    # 身份层
+    playbook: str
+    # 工作记忆层
+    position_notes: dict[str, str]
+    # 情境感知层
+    datetime: datetime
+    bar_index: int
+    decision_count: int
+    market: dict[str, Any]
+    account: dict[str, Any]
+    pending_orders: list[dict[str, Any]]
+    # 短期记忆层
+    recent_bars: list[dict[str, Any]]
+    events: list[dict[str, Any]]
+    recent_decisions: list[dict[str, Any]]
+    # 格式化产物（由 ContextManager 填充）
+    formatted_text: str = ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────

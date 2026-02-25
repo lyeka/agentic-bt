@@ -1,6 +1,6 @@
 """
-[INPUT]: agenticbt.engine, agenticbt.memory, agenticbt.tools, agenticbt.models, agenticbt.eval
-[OUTPUT]: Runner — 回测主循环编排器；ContextManager — 上下文组装
+[INPUT]: agenticbt.engine, agenticbt.memory, agenticbt.tools, agenticbt.models, agenticbt.eval, agenticbt.context
+[OUTPUT]: Runner — 回测主循环编排器
 [POS]: 顶层编排器，连接 Engine/Memory/Agent/Eval；_trigger_memory_moments() 在成交时写入记忆
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -14,55 +14,12 @@ from pathlib import Path
 import pandas as pd
 
 from .agent import AgentProtocol
+from .context import ContextManager
 from .engine import Engine
 from .eval import Evaluator
 from .memory import Memory, Workspace
 from .models import BacktestConfig, BacktestResult, Decision
 from .tools import ToolKit
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ContextManager
-# ─────────────────────────────────────────────────────────────────────────────
-
-class ContextManager:
-    """组装 Agent 决策所需的上下文（六层注入的简化版）"""
-
-    def assemble(
-        self,
-        engine: Engine,
-        memory: Memory,
-        bar_index: int,
-        events: list[dict],
-    ) -> dict:
-        snap = engine.market_snapshot()
-        acc = engine.account_snapshot()
-        playbook = memory.read_playbook()
-        position_notes = memory.read_position_notes(list(acc.positions.keys()))
-
-        return {
-            "datetime": snap.datetime,
-            "bar_index": bar_index,
-            "playbook": playbook,
-            "market": {
-                "symbol": snap.symbol,
-                "open": snap.open,
-                "high": snap.high,
-                "low": snap.low,
-                "close": snap.close,
-                "volume": snap.volume,
-            },
-            "account": {
-                "cash": acc.cash,
-                "equity": acc.equity,
-                "positions": {
-                    sym: {"size": p.size, "avg_price": p.avg_price}
-                    for sym, p in acc.positions.items()
-                },
-            },
-            "position_notes": position_notes,
-            "events": events,
-        }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -88,7 +45,7 @@ class Runner:
         )
         memory = Memory(ws)
         memory.init_playbook(config.strategy_prompt)
-        ctx_mgr = ContextManager()
+        ctx_mgr = ContextManager(config.context_config)
         decisions: list[Decision] = []
         t0 = datetime.now()
 
@@ -106,14 +63,14 @@ class Runner:
             ] + pending_events
             pending_events = []
 
-            # 组装上下文
-            context = ctx_mgr.assemble(engine, memory, engine._bar_index, events)
+            # 组装上下文（传入已积累的决策历史）
+            context = ctx_mgr.assemble(engine, memory, engine._bar_index, events, decisions)
 
             # 工具包（每次决策独立实例）
             toolkit = ToolKit(engine=engine, memory=memory)
 
             # Agent 决策
-            bar_dt = str(context["datetime"])[:10]
+            bar_dt = str(context.datetime)[:10]
             print(f"  bar {engine._bar_index:>3} {bar_dt} ...", end=" ", flush=True)
             decision = agent.decide(context, toolkit)
             print(f"{decision.action:<5}  tokens={decision.tokens_used}", flush=True)

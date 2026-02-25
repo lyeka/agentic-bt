@@ -113,6 +113,9 @@ def test_volume_partial_fill(): pass
 @scenario("features/engine.feature", "部分成交后剩余订单继续撮合")
 def test_partial_fill_continues(): pass
 
+@scenario("features/engine.feature", "查询最近 N 根 K 线")
+def test_recent_bars(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures / State
@@ -518,3 +521,50 @@ def then_short_unrealized_positive(ctx):
 def then_symbol_snapshot_close(ctx, sym, price):
     snap = _engine(ctx).market_snapshot(sym)
     assert snap.close == pytest.approx(price)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# recent_bars scenario steps
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _make_long_df(n: int = 30):
+    import numpy as np
+    rng = np.random.default_rng(0)
+    close = 100.0 + np.cumsum(rng.normal(0, 1, n))
+    return pd.DataFrame({
+        "date": pd.date_range("2024-01-01", periods=n),
+        "open": close + rng.normal(0, 0.5, n),
+        "high": close + rng.uniform(0.5, 2, n),
+        "low": close - rng.uniform(0.5, 2, n),
+        "close": close,
+        "volume": rng.integers(500_000, 2_000_000, n).astype(float),
+    })
+
+
+@given(parsers.parse("初始资金 100000 和 {n:d} 根 bar 数据"), target_fixture="ctx")
+def given_initial_cash_n_bars(n):
+    return {"cash": 100_000.0, "df": _make_long_df(n),
+            "risk": RiskConfig(), "commission": CommissionConfig(),
+            "slippage": SlippageConfig()}
+
+
+@when(parsers.parse("推进到第 {n:d} 根 bar"), target_fixture="ctx")
+def when_advance_to_n(ctx, n):
+    eng = _engine(ctx)
+    while eng._bar_index < n:
+        eng.advance()
+    return ctx
+
+
+@when(parsers.parse("查询最近 {n:d} 根 bar"), target_fixture="ctx")
+def when_query_recent_bars(ctx, n):
+    ctx["recent_bars_result"] = _engine(ctx).recent_bars(n)
+    return ctx
+
+
+@then(parsers.parse("应返回 {n:d} 条记录且 bar_index 从 {start:d} 到 {end:d}"))
+def then_recent_bars_range(ctx, n, start, end):
+    result = ctx["recent_bars_result"]
+    assert len(result) == n, f"expected {n} bars, got {len(result)}"
+    assert result[0]["bar_index"] == start, f"first bar_index: {result[0]['bar_index']}"
+    assert result[-1]["bar_index"] == end, f"last bar_index: {result[-1]['bar_index']}"

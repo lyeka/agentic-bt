@@ -66,3 +66,15 @@ Feature: 工具桥接层
     When 调用工具 "indicator_calc" 参数 {"name": "RSI", "symbol": "MSFT"}
     Then 应返回包含 value 的指标结果
     And 不因 symbol 错误而报错
+
+  Scenario: 通过 market_history 获取任意长度的历史 K 线
+    Given 初始资金 100000 和 60 根 bar 的引擎
+    When 推进到第 50 根 bar
+    And 调用 market_history 获取最近 30 根 bar
+    Then 应返回 30 条完整 OHLCV 记录
+
+  Scenario: market_history 请求超出可用范围时返回所有可用的
+    Given 初始资金 100000 和 10 根 bar 的引擎
+    When 推进到第 5 根 bar
+    And 调用 market_history 获取最近 20 根 bar
+    Then 应返回 6 条记录

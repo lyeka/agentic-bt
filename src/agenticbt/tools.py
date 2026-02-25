@@ -186,6 +186,21 @@ _SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "market_history",
+            "description": "获取最近 N 根 K 线的完整历史数据（OHLCV），用于分析趋势",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "bars": {"type": "integer", "description": "要获取的 K 线数量"},
+                    "symbol": {"type": "string", "description": "股票代码（默认主资产）"},
+                },
+                "required": ["bars"],
+            },
+        },
+    },
 ]
 
 
@@ -241,6 +256,7 @@ class ToolKit:
             "memory_recall": self._memory_recall,
             "order_cancel": self._order_cancel,
             "order_query": self._order_query,
+            "market_history": self._market_history,
         }
         handler = handlers.get(name)
         if handler is None:
@@ -345,3 +361,8 @@ class ToolKit:
 
     def _order_query(self, _args: dict) -> dict:
         return {"pending_orders": self._engine.pending_orders()}
+
+    def _market_history(self, args: dict) -> dict:
+        bars = args["bars"]
+        symbol = args.get("symbol")
+        return {"history": self._engine.market_history(bars, symbol)}

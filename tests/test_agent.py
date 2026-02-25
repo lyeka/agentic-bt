@@ -20,7 +20,7 @@ from pytest_bdd import given, parsers, scenario, then, when
 from agenticbt.agent import LLMAgent
 from agenticbt.engine import Engine
 from agenticbt.memory import Memory, Workspace
-from agenticbt.models import RiskConfig
+from agenticbt.models import Context, ContextConfig, RiskConfig
 from agenticbt.tools import ToolKit
 
 
@@ -147,10 +147,13 @@ def given_max_rounds(actx, n):
 
 @when("Agent 做出决策", target_fixture="actx")
 def when_decide(actx):
-    context = {
-        "datetime": datetime(2024, 1, 1),
-        "bar_index": 0,
-        "market": {
+    context = Context(
+        playbook="",
+        position_notes={},
+        datetime=datetime(2024, 1, 1),
+        bar_index=0,
+        decision_count=0,
+        market={
             "symbol": "AAPL",
             "open": 100.0,
             "high": 101.0,
@@ -158,12 +161,17 @@ def when_decide(actx):
             "close": 100.0,
             "volume": 1_000_000.0,
         },
-        "account": {
+        account={
             "cash": 100_000.0,
             "equity": 100_000.0,
             "positions": {},
         },
-    }
+        pending_orders=[],
+        recent_bars=[],
+        events=[],
+        recent_decisions=[],
+        formatted_text="## 当前行情  [2024-01-01  bar=0]\n  AAPL  开=100.0\n\n请先调用工具获取数据，再给出交易决策。",
+    )
     toolkit = actx["toolkit"]
     agent = actx["agent"]
 
