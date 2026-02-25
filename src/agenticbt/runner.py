@@ -113,7 +113,10 @@ class Runner:
             toolkit = ToolKit(engine=engine, memory=memory)
 
             # Agent 决策
+            bar_dt = str(context["datetime"])[:10]
+            print(f"  bar {engine._bar_index:>3} {bar_dt} ...", end=" ", flush=True)
             decision = agent.decide(context, toolkit)
+            print(f"{decision.action:<5}  tokens={decision.tokens_used}", flush=True)
             decisions.append(decision)
 
             # 持久化决策

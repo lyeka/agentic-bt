@@ -59,17 +59,24 @@ class LLMAgent:
     def decide(self, context: dict, toolkit: ToolKit) -> Decision:
         """ReAct loop：工具调用 → 继续，stop → 终止"""
         t0 = time.time()
-        messages = [{"role": "user", "content": self._format_context(context)}]
+        messages = [
+            {"role": "system", "content": context.get("playbook", "")},
+            {"role": "user",   "content": self._format_context(context)},
+        ]
         final_text = ""
         total_tokens = 0
 
         for _ in range(self.max_rounds):
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                tools=toolkit.schemas,
-                temperature=self._temperature,
-            )
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    tools=toolkit.schemas,
+                    temperature=self._temperature,
+                )
+            except Exception as e:
+                print(f"  [LLM ERROR] {type(e).__name__}: {e}", flush=True)
+                break
             choice = response.choices[0]
             total_tokens += response.usage.total_tokens if response.usage else 0
             messages.append(choice.message)
@@ -97,7 +104,27 @@ class LLMAgent:
         return self._build_decision(context, toolkit, final_text, total_tokens, latency_ms)
 
     def _format_context(self, context: dict) -> str:
-        return json.dumps(context, ensure_ascii=False, default=str, indent=2)
+        m = context["market"]
+        a = context["account"]
+        positions = ", ".join(
+            f"{sym} {p['size']}股@{p['avg_price']:.2f}"
+            for sym, p in a["positions"].items()
+        ) or "空仓"
+
+        lines = [
+            f"## 当前行情  [{context['datetime']}  bar={context['bar_index']}]",
+            f"  {m['symbol']}  开={m['open']}  高={m['high']}  低={m['low']}  收={m['close']}  量={m['volume']:.0f}",
+            f"## 账户",
+            f"  现金={a['cash']:.0f}  净值={a['equity']:.0f}  持仓: {positions}",
+        ]
+        if context.get("events"):
+            lines.append("## 成交事件")
+            for e in context["events"]:
+                lines.append(f"  {e['side']} {e['symbol']} {e['quantity']}股 @ {e['price']:.2f}")
+        if context.get("position_notes"):
+            lines.append(f"## 持仓备注\n  {context['position_notes']}")
+        lines.append("\n请先调用工具获取数据，再给出交易决策。")
+        return "\n".join(lines)
 
     def _build_decision(
         self,

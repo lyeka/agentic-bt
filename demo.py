@@ -24,6 +24,24 @@ import sys
 import time
 from datetime import datetime
 
+
+# ── .env 加载器（无需 python-dotenv 依赖）───────────────────────────────────
+def _load_dotenv(path: str = ".env") -> None:
+    """从 .env 文件加载环境变量（不覆盖已有变量）。"""
+    try:
+        with open(path) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, _, value = line.partition("=")
+                key   = key.strip()
+                value = value.strip().strip('"').strip("'")
+                if key and key not in os.environ:
+                    os.environ[key] = value
+    except FileNotFoundError:
+        pass
+
 # ── 把 src/ 加入路径（直接运行 demo.py 时用）────────────────────────────────
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
@@ -154,6 +172,7 @@ def print_report(result, elapsed: float) -> None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
+    _load_dotenv()
     parser = argparse.ArgumentParser(description="AgenticBT 端到端 Demo")
     parser.add_argument("--provider", choices=["claude", "openai", "ollama"], default="claude",
                         help="LLM 提供商 (default: claude)")
@@ -213,15 +232,15 @@ def main():
 
 def _resolve_provider(provider: str, model_override: str | None) -> tuple[str | None, str | None, str]:
     if provider == "claude":
-        base_url = "https://api.anthropic.com/v1/"
+        base_url = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1/")
         api_key  = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("OPENAI_API_KEY")
         model    = model_override or "claude-sonnet-4-20250514"
     elif provider == "openai":
-        base_url = None
+        base_url = os.environ.get("OPENAI_BASE_URL")
         api_key  = os.environ.get("OPENAI_API_KEY")
         model    = model_override or "gpt-4o-mini"
     elif provider == "ollama":
-        base_url = "http://localhost:11434/v1/"
+        base_url = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1/")
         api_key  = "ollama"
         model    = model_override or "qwen2.5:7b"
     else:
