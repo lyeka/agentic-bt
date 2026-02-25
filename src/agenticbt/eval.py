@@ -1,5 +1,5 @@
 """
-[INPUT]: agenticbt.models (Decision, Fill, PerformanceMetrics, ComplianceReport)
+[INPUT]: agenticbt.models (Decision, PerformanceMetrics, ComplianceReport)
 [OUTPUT]: Evaluator — 绩效与遵循度计算
 [POS]: 评估层，回测结束后由 runner 调用，不依赖 Engine 或 LLM
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 
-from .models import ComplianceReport, Decision, Fill, PerformanceMetrics
+from .models import ComplianceReport, Decision, PerformanceMetrics
 
 
 class Evaluator:
@@ -22,7 +22,7 @@ class Evaluator:
     def calc_performance(
         self,
         equity_curve: list[float],
-        fills: list[Fill],
+        trade_log: list[dict],          # [{"pnl": float, ...}, ...]
     ) -> PerformanceMetrics:
         if len(equity_curve) < 2:
             return PerformanceMetrics(
@@ -34,23 +34,20 @@ class Evaluator:
         initial = equity_curve[0]
         final = equity_curve[-1]
         total_return = (final - initial) / initial if initial else 0.0
-
         max_drawdown = self._max_drawdown(equity_curve)
         sharpe = self._sharpe(equity_curve)
 
-        # 从成交记录计算交易统计（简单按 sell fill 计算盈亏）
-        trade_pnls = self._fill_pnls(fills)
+        trade_pnls = [t["pnl"] for t in trade_log]
         total_trades = len(trade_pnls)
 
         if total_trades == 0:
-            win_rate = 0.0
-            profit_factor = 0.0
+            win_rate, profit_factor = 0.0, 0.0
         else:
             winners = [p for p in trade_pnls if p > 0]
-            losers = [p for p in trade_pnls if p < 0]
+            losers  = [p for p in trade_pnls if p < 0]
             win_rate = round(len(winners) / total_trades, 3)
             gross_profit = sum(winners)
-            gross_loss = abs(sum(losers)) if losers else 0
+            gross_loss   = abs(sum(losers)) if losers else 0
             profit_factor = round(gross_profit / gross_loss, 3) if gross_loss else float("inf")
 
         return PerformanceMetrics(
@@ -98,10 +95,4 @@ class Evaluator:
         std = math.sqrt(variance)
         if std == 0:
             return 0.0
-        return (mean - risk_free) / std * math.sqrt(252)  # 年化
-
-    def _fill_pnls(self, fills: list[Fill]) -> list[float]:
-        """从 Fill 记录中提取盈亏（sell fill 已含 realized pnl 近似值）"""
-        # 简单用成交价 - 0 做信号（实际 realized pnl 在 engine 中计算）
-        # 此处返回 sell fill 的数量作为 trade count 代理
-        return [1.0 for f in fills if f.side == "sell"]
+        return (mean - risk_free) / std * math.sqrt(252)

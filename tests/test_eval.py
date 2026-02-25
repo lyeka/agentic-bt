@@ -11,7 +11,7 @@ import pytest
 from pytest_bdd import given, scenario, then, when
 
 from agenticbt.eval import Evaluator
-from agenticbt.models import Decision, ToolCall
+from agenticbt.models import Decision
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -34,18 +34,17 @@ def test_compliance(): pass
 
 @given("权益曲线 [100000, 102000, 101000, 105000]", target_fixture="ectx")
 def given_equity_curve():
-    return {"equity": [100000.0, 102000.0, 101000.0, 105000.0], "fills": []}
+    return {"equity": [100000.0, 102000.0, 101000.0, 105000.0], "trade_log": []}
 
 
 @given("权益曲线 [100000, 100000, 100000]", target_fixture="ectx")
 def given_flat_equity():
-    return {"equity": [100000.0, 100000.0, 100000.0], "fills": []}
+    return {"equity": [100000.0, 100000.0, 100000.0], "trade_log": []}
 
 
 @given("交易记录 [{\"pnl\": 2000}, {\"pnl\": -1000}, {\"pnl\": 4000}]", target_fixture="ectx")
 def given_trades(ectx):
-    # fills 用于 win_rate/profit_factor 的场景独立注入
-    ectx["manual_pnls"] = [2000.0, -1000.0, 4000.0]
+    ectx["trade_log"] = [{"pnl": 2000.0}, {"pnl": -1000.0}, {"pnl": 4000.0}]
     return ectx
 
 
@@ -68,7 +67,7 @@ def given_decisions():
         )
     return {
         "decisions": [
-            _d("buy", {"RSI": 28}),
+            _d("buy",  {"RSI": 28}),
             _d("hold"),
             _d("hold", {"RSI": 55}),
             _d("sell", {"RSI": 72}),
@@ -83,17 +82,7 @@ def given_decisions():
 @when("计算绩效指标", target_fixture="ectx")
 def when_calc_perf(ectx):
     evaluator = Evaluator()
-    perf = evaluator.calc_performance(ectx["equity"], ectx.get("fills", []))
-    # 使用 manual_pnls 覆盖 win_rate / profit_factor（测试数据驱动）
-    manual = ectx.get("manual_pnls")
-    if manual:
-        winners = [p for p in manual if p > 0]
-        losers = [p for p in manual if p < 0]
-        n = len(manual)
-        perf.win_rate = round(len(winners) / n, 3)
-        perf.profit_factor = round(sum(winners) / abs(sum(losers)), 3)
-        perf.total_trades = n
-    ectx["perf"] = perf
+    ectx["perf"] = evaluator.calc_performance(ectx["equity"], ectx.get("trade_log", []))
     return ectx
 
 

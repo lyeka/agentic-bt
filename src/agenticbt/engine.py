@@ -66,6 +66,7 @@ class Engine:
         self._pending_orders: list[Order] = []
         self._fills: list[Fill] = []
         self._rejected: list[RejectedOrder] = []
+        self._trade_log: list[dict] = []   # 每笔平仓的真实盈亏记录
 
         # 权益曲线：每次 advance() 后追加
         self._equity_curve: list[float] = []
@@ -111,6 +112,10 @@ class Engine:
 
     def fills(self) -> list[Fill]:
         return list(self._fills)
+
+    def trade_log(self) -> list[dict]:
+        """每笔已平仓交易的真实盈亏记录，供 Evaluator 消费"""
+        return list(self._trade_log)
 
     # ── 订单提交 ──────────────────────────────────────────────────────────────
 
@@ -208,6 +213,15 @@ class Engine:
                 pos.realized_pnl += realized
                 pos.size -= fill.quantity
                 self._cash += fill.price * fill.quantity - fill.commission
+                self._trade_log.append({
+                    "symbol": fill.symbol,
+                    "quantity": fill.quantity,
+                    "buy_price": round(pos.avg_price, 4),
+                    "sell_price": fill.price,
+                    "pnl": round(realized, 4),
+                    "datetime": fill.datetime,
+                    "bar_index": fill.bar_index,
+                })
                 if pos.size == 0:
                     del self._positions[fill.symbol]
 

@@ -123,7 +123,7 @@ class Runner:
 
         # 评估
         evaluator = Evaluator()
-        performance = evaluator.calc_performance(engine.equity_curve(), engine.fills())
+        performance = evaluator.calc_performance(engine.equity_curve(), engine.trade_log())
         compliance = evaluator.calc_compliance(decisions)
 
         result = BacktestResult(

@@ -22,7 +22,7 @@ pyproject.toml - Python 包配置（venv: .venv/）
 
 <directory>
 docs/ - 完整设计文档集 (9 文件: architecture, engine, tools, memory, context, eval, agent-protocol, runner, roadmap)
-src/agenticbt/ - 核心业务代码 (9 文件: __init__, models, engine, indicators, memory, tools, agent, runner, eval)
+src/agenticbt/ - 核心业务代码 (10 文件: __init__, models, engine, indicators, memory, tools, agent, runner, eval, data)
 tests/ - BDD 测试 (14 文件: 7 features + 7 step definitions)
 </directory>
 
@@ -36,7 +36,8 @@ tests/ - BDD 测试 (14 文件: 7 features + 7 step definitions)
 | tools.py | ToolKit：OpenAI function calling schema + 分发 + 调用追踪 | docs/tools.md |
 | agent.py | LLMAgent：ReAct loop（OpenAI SDK 兼容），AgentProtocol | docs/agent-protocol.md |
 | runner.py | Runner 主循环 + ContextManager 六层上下文组装 | docs/runner.md |
-| eval.py | Evaluator：绩效指标 + 遵循度报告 | docs/eval.md |
+| eval.py | Evaluator：绩效指标（真实 trade_log 盈亏）+ 遵循度报告 | docs/eval.md |
+| data.py | load_csv 标准化加载 + make_sample_data 模拟数据生成 | - |
 
 ## 快速开始
 
@@ -47,19 +48,14 @@ python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 # 全量测试（38 个 BDD scenarios）
 .venv/bin/pytest tests/ -v
 
-# 端到端（需要 API key）
-OPENAI_API_KEY=sk-... .venv/bin/python -c "
-from agenticbt import run, BacktestConfig
-import pandas as pd
-result = run(BacktestConfig(
-    data=pd.read_csv('AAPL.csv', index_col='date', parse_dates=True),
-    symbol='AAPL',
-    strategy_prompt='RSI < 30 买入, RSI > 70 卖出',
-    model='claude-sonnet-4-20250514',
-    base_url='https://api.anthropic.com/v1/',
-))
-print(result.performance)
-"
+# Mock demo（无需 API key，验证框架）
+python demo.py --mock --bars 60
+
+# 使用内置模拟数据 + 真实 LLM（Claude）
+ANTHROPIC_API_KEY=sk-ant-... python demo.py --bars 60
+
+# 使用自定义 CSV + GPT
+OPENAI_API_KEY=sk-... python demo.py --provider openai --csv your_data.csv
 ```
 
 ## LLM 提供商切换（零代码变更）

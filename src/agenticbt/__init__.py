@@ -6,6 +6,7 @@
 """
 
 from .agent import AgentProtocol, LLMAgent
+from .data import load_csv, make_sample_data
 from .models import BacktestConfig, BacktestResult
 from .runner import Runner
 
@@ -41,4 +42,6 @@ __all__ = [
     "LLMAgent",
     "AgentProtocol",
     "Runner",
+    "load_csv",
+    "make_sample_data",
 ]

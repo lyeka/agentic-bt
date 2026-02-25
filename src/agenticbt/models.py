@@ -1,5 +1,5 @@
 """
-[INPUT]: dataclasses, datetime, typing
+[INPUT]: dataclasses, datetime, typing, pandas
 [OUTPUT]: Bar, Order, Fill, Position, AccountSnapshot, MarketSnapshot,
           BacktestConfig, Decision, ToolCall, BacktestResult, RiskConfig,
           CommissionConfig, SlippageConfig
@@ -11,7 +11,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -138,9 +141,7 @@ class SlippageConfig:
 @dataclass
 class BacktestConfig:
     """回测配置"""
-    import pandas as pd
-
-    data: "pd.DataFrame"            # OHLCV DataFrame，index 为 datetime
+    data: "pd.DataFrame"            # OHLCV DataFrame，date 列或 DatetimeIndex
     symbol: str
     strategy_prompt: str
     model: str = "claude-sonnet-4-20250514"
