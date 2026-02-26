@@ -141,7 +141,7 @@ class ContextManager:
             for d in ctx.recent_decisions:
                 lines.append(f"  [{d['bar_index']}] {d['action']}: {d['reasoning']}")
 
-        lines.append("\n请先调用工具获取数据，再给出交易决策。")
+        lines.append("\n以上行情与账户数据已是最新快照，无需重复获取。如需技术指标请调用 indicator_calc，然后给出交易决策。")
         return "\n".join(lines)
 
     def _format_event(self, e: dict[str, Any]) -> str:

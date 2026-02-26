@@ -95,7 +95,11 @@ class LLMAgent:
                     "output_content": choice.message.content,
                     "output_tool_calls": _safe_tool_calls(choice.message.tool_calls),
                     "finish_reason": choice.finish_reason,
-                    "tokens": {"input": 0, "output": 0, "total": round_tokens},
+                    "tokens": {
+                        "input": response.usage.prompt_tokens if response.usage else 0,
+                        "output": response.usage.completion_tokens if response.usage else 0,
+                        "total": round_tokens,
+                    },
                     "duration_ms": llm_ms,
                 })
 

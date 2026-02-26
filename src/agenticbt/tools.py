@@ -79,7 +79,7 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "trade_execute",
-            "description": "执行交易操作",
+            "description": "执行交易操作（buy/sell/close）。观望时无需调用此工具，直接输出分析即可。",
             "parameters": {
                 "type": "object",
                 "properties": {
