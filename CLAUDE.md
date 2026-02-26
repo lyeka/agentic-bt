@@ -22,7 +22,7 @@ pyproject.toml - Python 包配置（venv: .venv/）
 ```
 
 <directory>
-docs/ - 完整设计文档集 (10 文件: architecture, engine, tools, memory, context, eval, agent-protocol, runner, tracer, roadmap)
+docs/ - 完整设计文档集 (11 文件: architecture, engine, tools, compute, memory, context, eval, agent-protocol, runner, tracer, roadmap)
 src/agenticbt/ - 核心业务代码 (12 文件: __init__, models, engine, indicators, memory, tools, context, agent, runner, eval, data, tracer)
 examples/ - 策略模块 (2 文件: __init__, strategies)
 tests/ - BDD 测试 + E2E (22 文件: 10 features + 11 step definitions + 1 e2e)
