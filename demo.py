@@ -2,20 +2,19 @@
 """
 AgenticBT 端到端 Demo
 =====================
-用一个真实 LLM 运行完整回测，打印结构化结果报告。
+7 种策略展示 AI Agent 的认知能力和框架全能力。
 
 快速开始：
-    # Claude (via Anthropic API)
-    ANTHROPIC_API_KEY=sk-ant-... python demo.py
-
-    # GPT-4o (via OpenAI API)
-    OPENAI_API_KEY=sk-... python demo.py --provider openai
-
-    # 本地 Ollama（无需 key）
-    python demo.py --provider ollama --model qwen2.5:7b
-
-    # 使用 mock agent（无需 API key，快速验证框架）
+    # Mock 策略（无需 API key）
     python demo.py --mock
+    python demo.py --mock --strategy bracket_atr
+    python demo.py --mock --strategy all
+
+    # LLM 策略（需要 API key）
+    ANTHROPIC_API_KEY=sk-ant-... python demo.py --strategy free_play
+
+    # 自定义 CSV
+    OPENAI_API_KEY=sk-... python demo.py --provider openai --csv data.csv
 """
 
 import argparse
@@ -24,10 +23,11 @@ import sys
 import time
 from datetime import datetime
 
+import pandas as pd
 
-# ── .env 加载器（无需 python-dotenv 依赖）───────────────────────────────────
+
+# ── .env 加载器 ──────────────────────────────────────────────────────────────
 def _load_dotenv(path: str = ".env") -> None:
-    """从 .env 文件加载环境变量（不覆盖已有变量）。"""
     try:
         with open(path) as f:
             for line in f:
@@ -42,83 +42,30 @@ def _load_dotenv(path: str = ".env") -> None:
     except FileNotFoundError:
         pass
 
-# ── 把 src/ 加入路径（直接运行 demo.py 时用）────────────────────────────────
+
+# ── 路径设置 ─────────────────────────────────────────────────────────────────
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from agenticbt import BacktestConfig, LLMAgent, load_csv, make_sample_data, run
-from agenticbt.models import CommissionConfig, Context, Decision, RiskConfig
-from agenticbt.tools import ToolKit
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Mock Agent（无需 API key，演示框架结构）
-# ─────────────────────────────────────────────────────────────────────────────
-
-class RsiMockAgent:
-    """
-    规则驱动的 mock agent：用工具查询 RSI，RSI < 50 买入，RSI > 55 卖出。
-    模拟 LLM agent 的行为，但完全确定性，不调用真实 API。
-    """
-
-    def decide(self, context: Context, toolkit: ToolKit) -> Decision:
-        # 1. 观察市场
-        market = toolkit.execute("market_observe", {})
-
-        # 2. 查询 RSI
-        rsi_result = toolkit.execute("indicator_calc", {"name": "RSI", "period": 14})
-        rsi = rsi_result.get("value")
-
-        # 3. 查询账户
-        account = toolkit.execute("account_status", {})
-        has_position = bool(account.get("positions"))
-
-        # 4. 决策逻辑
-        action, symbol, qty, reasoning = "hold", None, None, ""
-        close = market.get("close", 0)
-
-        if rsi is not None:
-            if rsi < 50 and not has_position:
-                qty = max(1, int(account["cash"] * 0.95 / close))
-                action, symbol = "buy", context.market["symbol"]
-                reasoning = f"RSI={rsi:.1f} < 50，超卖信号，买入 {qty} 股 @ {close}"
-                toolkit.execute("trade_execute", {"action": "buy", "symbol": symbol, "quantity": qty})
-                toolkit.execute("memory_log", {"content": f"买入 {symbol} {qty}股，RSI={rsi:.1f}"})
-            elif rsi > 55 and has_position:
-                action, symbol = "close", context.market["symbol"]
-                reasoning = f"RSI={rsi:.1f} > 55，超买信号，平仓"
-                toolkit.execute("trade_execute", {"action": "close", "symbol": symbol})
-                toolkit.execute("memory_log", {"content": f"平仓 {symbol}，RSI={rsi:.1f}"})
-            else:
-                reasoning = f"RSI={rsi:.1f}，无交易信号，持仓={'有' if has_position else '无'}"
-        else:
-            reasoning = "RSI 数据不足，观望"
-
-        return Decision(
-            datetime=context.datetime,
-            bar_index=context.bar_index,
-            action=action,
-            symbol=symbol,
-            quantity=qty,
-            reasoning=reasoning,
-            market_snapshot=context.market,
-            account_snapshot=context.account,
-            indicators_used={"RSI": rsi},
-            tool_calls=list(toolkit.call_log),
-        )
+from agenticbt.models import CommissionConfig, RiskConfig
+from examples.strategies import STRATEGIES, StrategyDef, get_strategy, list_strategies
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 结果报告
 # ─────────────────────────────────────────────────────────────────────────────
 
-def print_report(result, elapsed: float) -> None:
+def print_report(result, elapsed: float, strategy_name: str = "") -> None:
     p = result.performance
     c = result.compliance
-
     sep = "─" * 55
 
+    header = f"  AgenticBT 回测报告"
+    if strategy_name:
+        header += f"  [{strategy_name}]"
+
     print(f"\n{'═' * 55}")
-    print(f"  AgenticBT 回测报告")
+    print(header)
     print(f"{'═' * 55}")
 
     print(f"\n【绩效指标】")
@@ -151,14 +98,13 @@ def print_report(result, elapsed: float) -> None:
     print(f"  Token 消耗    {result.total_tokens:,}")
     print(f"  工作空间      {result.workspace_path}")
 
-    # 决策样本（首尾各 3 条）
     decisions = result.decisions
     sample = decisions[:3] + (["..."] if len(decisions) > 6 else []) + decisions[-3:]
     print(f"\n【决策日志（共 {len(decisions)} 条）】")
     print(sep)
     for d in sample:
         if d == "...":
-            print(f"  ...")
+            print("  ...")
             continue
         dt = d.datetime.strftime("%Y-%m-%d") if isinstance(d.datetime, datetime) else str(d.datetime)
         tag = {"buy": "🔼 买", "sell": "🔽 卖", "close": "⬛ 平", "hold": "⏸ 观"}.get(d.action, d.action)
@@ -167,70 +113,122 @@ def print_report(result, elapsed: float) -> None:
     print(f"\n{'═' * 55}\n")
 
 
+def print_comparison(results: list[tuple[str, object, float]]) -> None:
+    """打印多策略对比摘要表"""
+    print(f"\n{'═' * 70}")
+    print("  策略对比摘要")
+    print(f"{'═' * 70}")
+    print(f"  {'策略':<20s} {'收益率':>8s} {'回撤':>8s} {'夏普':>8s} {'交易':>6s} {'胜率':>6s}")
+    print(f"  {'─' * 60}")
+    for name, result, _ in results:
+        p = result.performance
+        wr = f"{p.win_rate*100:.0f}%" if p.total_trades > 0 else "N/A"
+        print(f"  {name:<20s} {p.total_return*100:>+7.2f}% {p.max_drawdown*100:>7.2f}% {p.sharpe_ratio:>7.3f} {p.total_trades:>6d} {wr:>6s}")
+    print(f"{'═' * 70}\n")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 单策略运行
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_data(strat: StrategyDef, csv_path: str | None, bars_override: int | None) -> tuple:
+    """构建数据和 symbol，返回 (data, symbol)"""
+    if csv_path:
+        df = load_csv(csv_path)
+        bars = bars_override or strat.bars
+        return df.head(bars), strat.symbol
+
+    bars = bars_override or strat.bars
+
+    if strat.extra_symbols:
+        # 多资产：dict[str, DataFrame]
+        data = {strat.symbol: make_sample_data(strat.symbol, periods=bars, seed=strat.seed, regime=strat.regime)}
+        for sym, seed in strat.extra_symbols:
+            data[sym] = make_sample_data(sym, periods=bars, seed=seed, regime=strat.regime)
+        return data, strat.symbol
+
+    return make_sample_data(strat.symbol, periods=bars, seed=strat.seed, regime=strat.regime), strat.symbol
+
+
+def _run_strategy(
+    strat: StrategyDef,
+    args,
+) -> tuple[object, float] | None:
+    """运行单个策略，返回 (result, elapsed) 或 None（跳过）"""
+    is_mock = args.mock
+
+    # LLM-only 策略在 mock 模式下跳过
+    if is_mock and strat.mock_cls is None:
+        print(f"\n跳过 [{strat.name}]: 此策略需要 LLM，请去掉 --mock 并配置 API key\n")
+        return None
+
+    data, symbol = _build_data(strat, args.csv, args.bars)
+
+    # Agent
+    if is_mock:
+        agent = strat.mock_cls()
+        print(f"策略: {strat.name} — {strat.description}")
+        print(f"模式: Mock Agent | regime={strat.regime} | bars={strat.bars}")
+    else:
+        base_url, api_key, model = _resolve_provider(args.provider, args.model)
+        agent = LLMAgent(model=model, base_url=base_url, api_key=api_key, max_rounds=5)
+        print(f"策略: {strat.name} — {strat.description}")
+        print(f"模式: LLM Agent ({args.provider} / {model})")
+
+    config = BacktestConfig(
+        data=data,
+        symbol=symbol,
+        strategy_prompt=strat.llm_prompt,
+        risk=strat.risk,
+        commission=CommissionConfig(rate=0.001),
+        decision_start_bar=strat.decision_start_bar,
+    )
+
+    bars_count = len(data) if isinstance(data, pd.DataFrame) else len(next(iter(data.values())))
+    print(f"开始回测: {bars_count} 根 bar ...")
+    t0 = time.time()
+    result = run(config, agent=agent)
+    elapsed = time.time() - t0
+
+    return result, elapsed
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CLI 入口
 # ─────────────────────────────────────────────────────────────────────────────
 
 def main():
     _load_dotenv()
+    strategy_names = list_strategies() + ["all"]
     parser = argparse.ArgumentParser(description="AgenticBT 端到端 Demo")
     parser.add_argument("--provider", choices=["claude", "openai", "ollama"], default="claude",
                         help="LLM 提供商 (default: claude)")
     parser.add_argument("--model", default=None, help="模型名称（覆盖默认值）")
-    parser.add_argument("--csv",   default=None, help="自定义 CSV 路径（默认使用内置模拟数据）")
-    parser.add_argument("--symbol", default="AAPL", help="股票代码 (default: AAPL)")
-    parser.add_argument("--bars",  type=int, default=60, help="回测 bar 数量 (default: 60)")
-    parser.add_argument("--decision-start-bar", type=int, default=14,
-                        help="从第几根 bar 开始触发决策 (default: 14, 适配 RSI14 预热)")
+    parser.add_argument("--csv",   default=None, help="自定义 CSV 路径")
+    parser.add_argument("--bars",  type=int, default=None, help="覆盖策略默认 bar 数量")
     parser.add_argument("--mock",  action="store_true", help="使用 mock agent（无需 API key）")
+    parser.add_argument("--strategy", choices=strategy_names, default="rsi",
+                        help="策略名称 (default: rsi)")
     args = parser.parse_args()
 
-    # ── 数据 ────────────────────────────────────────────────────────────────
-    if args.csv:
-        print(f"加载数据: {args.csv}")
-        df = load_csv(args.csv)
+    if args.strategy == "all":
+        # 运行所有策略
+        results = []
+        for name in list_strategies():
+            strat = get_strategy(name)
+            outcome = _run_strategy(strat, args)
+            if outcome:
+                result, elapsed = outcome
+                print_report(result, elapsed, strategy_name=name)
+                results.append((name, result, elapsed))
+        if len(results) > 1:
+            print_comparison(results)
     else:
-        print(f"使用模拟数据: {args.symbol}，{args.bars} 根 bar")
-        df = make_sample_data(args.symbol, periods=args.bars)
-
-    df = df.head(args.bars)
-
-    # ── Agent ────────────────────────────────────────────────────────────────
-    if args.mock:
-        print("模式: Mock Agent（RSI 规则策略）\n")
-        agent = RsiMockAgent()
-    else:
-        base_url, api_key, model = _resolve_provider(args.provider, args.model)
-        print(f"模式: LLM Agent ({args.provider} / {model})\n")
-        agent = LLMAgent(model=model, base_url=base_url, api_key=api_key, max_rounds=5)
-
-    # ── 配置 ────────────────────────────────────────────────────────────────
-    strategy = (
-        "你是一位量化交易员，使用 RSI 均值回归策略。\n"
-        "规则：\n"
-        "1. RSI < 50 且无持仓时：买入，仓位不超过账户净值的 90%\n"
-        "2. RSI > 55 且有持仓时：平仓\n"
-        "3. 其他情况：观望\n"
-        "每次决策前必须先调用 market_observe 和 indicator_calc(RSI) 获取最新数据。\n"
-        "交易后用 memory_log 记录决策理由。"
-    )
-
-    config = BacktestConfig(
-        data=df,
-        symbol=args.symbol,
-        strategy_prompt=strategy,
-        risk=RiskConfig(max_position_pct=0.95),
-        commission=CommissionConfig(rate=0.001),
-        decision_start_bar=args.decision_start_bar,
-    )
-
-    # ── 运行 ────────────────────────────────────────────────────────────────
-    print(f"开始回测: {len(df)} 根 bar ...")
-    t0 = time.time()
-    result = run(config, agent=agent)
-    elapsed = time.time() - t0
-
-    print_report(result, elapsed)
+        strat = get_strategy(args.strategy)
+        outcome = _run_strategy(strat, args)
+        if outcome:
+            result, elapsed = outcome
+            print_report(result, elapsed, strategy_name=args.strategy)
 
 
 def _resolve_provider(provider: str, model_override: str | None) -> tuple[str | None, str | None, str]:

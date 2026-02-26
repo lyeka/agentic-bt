@@ -1,6 +1,6 @@
 """
-[INPUT]: pandas, pathlib
-[OUTPUT]: load_csv, make_sample_data — 数据加载与示例数据生成
+[INPUT]: pandas, pathlib, numpy
+[OUTPUT]: load_csv, make_sample_data — 数据加载与示例数据生成（支持 regime 行情模式）
 [POS]: 用户入口工具，标准化外部数据为框架所需的 OHLCV DataFrame
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -76,28 +76,32 @@ def make_sample_data(
     periods: int = 252,
     initial_price: float = 150.0,
     seed: int = 42,
+    regime: str = "random",
 ) -> pd.DataFrame:
     """
     生成模拟 OHLCV 数据，用于测试和演示。
 
-    使用几何布朗运动模拟价格，参数接近真实股票特征。
+    regime 控制行情特征：
+      random         — 默认随机漫步（μ=0.0003, σ=0.015）
+      trending       — 强趋势低波动（μ=0.002, σ=0.01）
+      mean_reverting — 零漂移高波动（μ=0, σ=0.02）
+      volatile       — 极高波动（μ=0, σ=0.03）
+      bull_bear      — 前半段牛市后半段熊市
     """
     rng = np.random.default_rng(seed)
-    dates = pd.date_range(start, periods=periods, freq="B")  # 仅工作日
+    dates = pd.date_range(start, periods=periods, freq="B")
 
-    # 几何布朗运动：日收益率 μ=0.0003, σ=0.015
-    returns = rng.normal(loc=0.0003, scale=0.015, size=periods)
-    close = initial_price * np.exp(np.cumsum(returns))
+    close = _generate_close(regime, periods, initial_price, rng)
+    returns = np.diff(np.log(close), prepend=np.log(initial_price))
 
     # 构造 OHLC：日内波动 ≈ ATR
     daily_range = close * rng.uniform(0.005, 0.025, size=periods)
     open_ = close * np.exp(rng.normal(0, 0.003, size=periods))
     high = np.maximum(close, open_) + daily_range * rng.uniform(0.3, 1.0, size=periods)
     low  = np.minimum(close, open_) - daily_range * rng.uniform(0.3, 1.0, size=periods)
-    low  = np.maximum(low, close * 0.5)  # 防止负价格
+    low  = np.maximum(low, close * 0.5)
 
     volume = rng.integers(5_000_000, 50_000_000, size=periods).astype(float)
-    # 量价共振：大涨/大跌时成交量放大
     volume *= (1 + np.abs(returns) * 20)
 
     return pd.DataFrame({
@@ -108,3 +112,34 @@ def make_sample_data(
         "close":  np.round(close, 2),
         "volume": np.round(volume).astype(int).astype(float),
     })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Regime 价格生成
+# ─────────────────────────────────────────────────────────────────────────────
+
+_REGIME_PARAMS: dict[str, tuple[float, float]] = {
+    "random":         (0.0003, 0.015),
+    "trending":       (0.002,  0.01),
+    "mean_reverting": (0.0,    0.02),
+    "volatile":       (0.0,    0.03),
+}
+
+
+def _generate_close(
+    regime: str, periods: int, initial_price: float, rng: np.random.Generator,
+) -> np.ndarray:
+    """根据 regime 生成收盘价序列"""
+    if regime in _REGIME_PARAMS:
+        mu, sigma = _REGIME_PARAMS[regime]
+        returns = rng.normal(loc=mu, scale=sigma, size=periods)
+        return initial_price * np.exp(np.cumsum(returns))
+
+    if regime == "bull_bear":
+        mid = periods // 2
+        bull = rng.normal(loc=0.003, scale=0.01, size=mid)
+        bear = rng.normal(loc=-0.002, scale=0.015, size=periods - mid)
+        returns = np.concatenate([bull, bear])
+        return initial_price * np.exp(np.cumsum(returns))
+
+    raise ValueError(f"未知 regime: {regime!r}，可选: {list(_REGIME_PARAMS) + ['bull_bear']}")

@@ -13,17 +13,19 @@ Agent 说意图，Framework 说真相。LLM Agent 像人类交易员一样思考
 ```
 docs/          - 设计文档 (9 篇，指导全部开发)
 src/
-  agenticbt/   - 9 个业务文件
+  agenticbt/   - 12 个业务文件
+examples/      - 策略注册表 + Mock Agent + LLM Prompt（7 策略）
 tests/
-  features/    - 7 个 Gherkin feature 文件（可执行规格说明）
-  test_*.py    - BDD step definitions（38 个 scenarios）
+  features/    - 10 个 Gherkin feature 文件（可执行规格说明）
+  test_*.py    - BDD step definitions + E2E 策略测试
 pyproject.toml - Python 包配置（venv: .venv/）
 ```
 
 <directory>
 docs/ - 完整设计文档集 (10 文件: architecture, engine, tools, memory, context, eval, agent-protocol, runner, tracer, roadmap)
 src/agenticbt/ - 核心业务代码 (12 文件: __init__, models, engine, indicators, memory, tools, context, agent, runner, eval, data, tracer)
-tests/ - BDD 测试 (18 文件: 9 features + 9 step definitions)
+examples/ - 策略模块 (2 文件: __init__, strategies)
+tests/ - BDD 测试 + E2E (22 文件: 10 features + 11 step definitions + 1 e2e)
 </directory>
 
 ## 核心模块
@@ -41,7 +43,7 @@ tests/ - BDD 测试 (18 文件: 9 features + 9 step definitions)
 | tracer.py | TraceWriter 本地 JSONL 追踪 + decision_to_dict 完整序列化；对齐 OTel GenAI | docs/tracer.md |
 | context.py | ContextManager：五层认知上下文组装（recent_bars/pending_orders/recent_decisions）+ LLM 文本格式化 | docs/context.md |
 | eval.py | Evaluator：绩效指标（真实 trade_log 盈亏）+ 遵循度报告 | docs/eval.md |
-| data.py | load_csv 标准化加载 + make_sample_data 模拟数据生成 | - |
+| data.py | load_csv 标准化加载 + make_sample_data 模拟数据生成（regime 多行情模式） | - |
 
 ## 快速开始
 
@@ -49,14 +51,16 @@ tests/ - BDD 测试 (18 文件: 9 features + 9 step definitions)
 # 安装
 python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
-# 全量测试（67 个 BDD scenarios）
+# 全量测试（108 个 scenarios）
 .venv/bin/pytest tests/ -v
 
-# Mock demo（无需 API key，验证框架）
-python demo.py --mock --bars 60
+# Mock demo（无需 API key，7 种策略）
+python demo.py --mock
+python demo.py --mock --strategy bracket_atr
+python demo.py --mock --strategy all
 
 # 使用内置模拟数据 + 真实 LLM（Claude）
-ANTHROPIC_API_KEY=sk-ant-... python demo.py --bars 60
+ANTHROPIC_API_KEY=sk-ant-... python demo.py --strategy free_play
 
 # 使用自定义 CSV + GPT
 OPENAI_API_KEY=sk-... python demo.py --provider openai --csv your_data.csv
@@ -157,7 +161,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-仿真度升级完成：94/94 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪）
+仿真度升级完成：108/108 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化）
 路线图：docs/roadmap.md
 
 # currentDate

@@ -13,6 +13,6 @@
 `runner.py`: Runner 回测主循环；集成 ContextManager + TraceWriter，追踪 agent_step/context/decision；decision_to_dict 完整持久化
 `tracer.py`: TraceWriter 本地 JSONL 追踪写入器 + decision_to_dict 序列化；对齐 OTel GenAI Semantic Conventions
 `eval.py`: Evaluator，绩效指标(trade_log 真实盈亏) + 遵循度报告计算
-`data.py`: load_csv 标准化加载 + make_sample_data 模拟数据生成
+`data.py`: load_csv 标准化加载 + make_sample_data 模拟数据生成（regime 参数：random/trending/mean_reverting/volatile/bull_bear）
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
