@@ -46,7 +46,7 @@ def _load_dotenv(path: str = ".env") -> None:
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "src"))
 
 from agenticbt import BacktestConfig, LLMAgent, load_csv, make_sample_data, run
-from agenticbt.models import CommissionConfig, Decision, RiskConfig
+from agenticbt.models import CommissionConfig, Context, Decision, RiskConfig
 from agenticbt.tools import ToolKit
 
 
@@ -56,11 +56,11 @@ from agenticbt.tools import ToolKit
 
 class RsiMockAgent:
     """
-    规则驱动的 mock agent：用工具查询 RSI，RSI < 35 买入，RSI > 65 卖出。
+    规则驱动的 mock agent：用工具查询 RSI，RSI < 50 买入，RSI > 55 卖出。
     模拟 LLM agent 的行为，但完全确定性，不调用真实 API。
     """
 
-    def decide(self, context: dict, toolkit: ToolKit) -> Decision:
+    def decide(self, context: Context, toolkit: ToolKit) -> Decision:
         # 1. 观察市场
         market = toolkit.execute("market_observe", {})
 
@@ -77,15 +77,15 @@ class RsiMockAgent:
         close = market.get("close", 0)
 
         if rsi is not None:
-            if rsi < 35 and not has_position:
+            if rsi < 50 and not has_position:
                 qty = max(1, int(account["cash"] * 0.95 / close))
-                action, symbol = "buy", context["market"]["symbol"]
-                reasoning = f"RSI={rsi:.1f} < 35，超卖信号，买入 {qty} 股 @ {close}"
+                action, symbol = "buy", context.market["symbol"]
+                reasoning = f"RSI={rsi:.1f} < 50，超卖信号，买入 {qty} 股 @ {close}"
                 toolkit.execute("trade_execute", {"action": "buy", "symbol": symbol, "quantity": qty})
                 toolkit.execute("memory_log", {"content": f"买入 {symbol} {qty}股，RSI={rsi:.1f}"})
-            elif rsi > 65 and has_position:
-                action, symbol = "close", context["market"]["symbol"]
-                reasoning = f"RSI={rsi:.1f} > 65，超买信号，平仓"
+            elif rsi > 55 and has_position:
+                action, symbol = "close", context.market["symbol"]
+                reasoning = f"RSI={rsi:.1f} > 55，超买信号，平仓"
                 toolkit.execute("trade_execute", {"action": "close", "symbol": symbol})
                 toolkit.execute("memory_log", {"content": f"平仓 {symbol}，RSI={rsi:.1f}"})
             else:
@@ -94,14 +94,14 @@ class RsiMockAgent:
             reasoning = "RSI 数据不足，观望"
 
         return Decision(
-            datetime=context["datetime"],
-            bar_index=context["bar_index"],
+            datetime=context.datetime,
+            bar_index=context.bar_index,
             action=action,
             symbol=symbol,
             quantity=qty,
             reasoning=reasoning,
-            market_snapshot=context["market"],
-            account_snapshot=context["account"],
+            market_snapshot=context.market,
+            account_snapshot=context.account,
             indicators_used={"RSI": rsi},
             tool_calls=list(toolkit.call_log),
         )
@@ -180,6 +180,8 @@ def main():
     parser.add_argument("--csv",   default=None, help="自定义 CSV 路径（默认使用内置模拟数据）")
     parser.add_argument("--symbol", default="AAPL", help="股票代码 (default: AAPL)")
     parser.add_argument("--bars",  type=int, default=60, help="回测 bar 数量 (default: 60)")
+    parser.add_argument("--decision-start-bar", type=int, default=14,
+                        help="从第几根 bar 开始触发决策 (default: 14, 适配 RSI14 预热)")
     parser.add_argument("--mock",  action="store_true", help="使用 mock agent（无需 API key）")
     args = parser.parse_args()
 
@@ -206,8 +208,8 @@ def main():
     strategy = (
         "你是一位量化交易员，使用 RSI 均值回归策略。\n"
         "规则：\n"
-        "1. RSI < 35 且无持仓时：买入，仓位不超过账户净值的 90%\n"
-        "2. RSI > 65 且有持仓时：平仓\n"
+        "1. RSI < 50 且无持仓时：买入，仓位不超过账户净值的 90%\n"
+        "2. RSI > 55 且有持仓时：平仓\n"
         "3. 其他情况：观望\n"
         "每次决策前必须先调用 market_observe 和 indicator_calc(RSI) 获取最新数据。\n"
         "交易后用 memory_log 记录决策理由。"
@@ -219,6 +221,7 @@ def main():
         strategy_prompt=strategy,
         risk=RiskConfig(max_position_pct=0.95),
         commission=CommissionConfig(rate=0.001),
+        decision_start_bar=args.decision_start_bar,
     )
 
     # ── 运行 ────────────────────────────────────────────────────────────────
