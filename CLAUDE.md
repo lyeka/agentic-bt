@@ -23,9 +23,9 @@ pyproject.toml - Python 包配置（venv: .venv/）
 
 <directory>
 docs/ - 完整设计文档集 (11 文件: architecture, engine, tools, compute, memory, context, eval, agent-protocol, runner, tracer, roadmap)
-src/agenticbt/ - 核心业务代码 (12 文件: __init__, models, engine, indicators, memory, tools, context, agent, runner, eval, data, tracer)
+src/agenticbt/ - 核心业务代码 (13 文件: __init__, models, engine, indicators, memory, tools, sandbox, context, agent, runner, eval, data, tracer)
 examples/ - 策略模块 (2 文件: __init__, strategies)
-tests/ - BDD 测试 + E2E (22 文件: 10 features + 11 step definitions + 1 e2e)
+tests/ - BDD 测试 + E2E (25 文件: 11 features + 12 step definitions + 1 e2e)
 </directory>
 
 ## 核心模块
@@ -37,7 +37,8 @@ tests/ - BDD 测试 + E2E (22 文件: 10 features + 11 step definitions + 1 e2e)
 | engine.py | 确定性市场模拟：多资产数据/market+limit+stop+bracket 订单/多空/风控4检查/百分比滑点/部分成交 | docs/engine.md |
 | indicators.py | pandas-ta 防前瞻包装，calc(name, df, bar_index) | - |
 | memory.py | 文件式记忆：Workspace 隔离 + log/note/recall | docs/memory.md |
-| tools.py | ToolKit：OpenAI function calling schema + 分发 + 调用追踪；market_observe 支持 symbol | docs/tools.md |
+| tools.py | ToolKit：OpenAI function calling schema + 分发 + 调用追踪；market_observe 支持 symbol；含 compute 沙箱计算 | docs/tools.md, docs/compute.md |
+| sandbox.py | exec_compute 沙箱执行器：eval-first/白名单 globals/Trading Coreutils/SIGALRM 超时/自动降维序列化 | docs/compute.md |
 | agent.py | LLMAgent：ReAct loop（OpenAI SDK 兼容），AgentProtocol | docs/agent-protocol.md |
 | runner.py | Runner 主循环；集成 ContextManager + TraceWriter，追踪 agent_step/context/decision | docs/runner.md |
 | tracer.py | TraceWriter 本地 JSONL 追踪 + decision_to_dict 完整序列化；对齐 OTel GenAI | docs/tracer.md |
@@ -161,7 +162,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-仿真度升级完成：108/108 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化）
+仿真度升级完成：124/124 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱计算工具）
 路线图：docs/roadmap.md
 
 # currentDate

@@ -1,7 +1,7 @@
 """
-[INPUT]: agenticbt.engine, agenticbt.indicators, agenticbt.memory, agenticbt.models
+[INPUT]: agenticbt.engine, agenticbt.indicators, agenticbt.memory, agenticbt.models, agenticbt.sandbox
 [OUTPUT]: ToolKit — 工具桥接层，提供 schemas/execute/call_log/indicator_queries/trade_actions；_TOOL_REMEDIATION — 错误提示常量
-[POS]: Agent 和 Engine/Memory 的中间层，OpenAI function calling 格式适配；execute() 带异常防御
+[POS]: Agent 和 Engine/Memory 的中间层，OpenAI function calling 格式适配；execute() 带异常防御；含 compute 沙箱计算工具
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -13,6 +13,7 @@ from .engine import Engine
 from .indicators import IndicatorEngine
 from .memory import Memory
 from .models import ToolCall
+from .sandbox import exec_compute
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -201,6 +202,48 @@ _SCHEMAS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "compute",
+            "description": (
+                "在沙箱中执行 Python 代码分析市场数据。数据已截断到当前 bar，无法访问未来数据。\n"
+                "\n"
+                "可用变量：\n"
+                "  df — 主资产 DataFrame，列: date/open/high/low/close/volume，RangeIndex\n"
+                "  df_{sym} — 多资产场景下各资产数据（如 df_aapl, df_spy）\n"
+                "  account — dict: {cash, equity, positions: {symbol: {size, avg_price}}}\n"
+                "  cash/equity/positions — 从 account 展开的顶层变量\n"
+                "  pd/np/ta/math — pandas, numpy, pandas_ta, math\n"
+                "\n"
+                "预置函数：\n"
+                "  latest(series) — 取 Series 最新值\n"
+                "  prev(series, n=1) — 取前 N 个值\n"
+                "  crossover(fast, slow) — 金叉判断\n"
+                "  crossunder(fast, slow) — 死叉判断\n"
+                "  above(series, val) / below(series, val) — 阈值判断\n"
+                "\n"
+                "返回规则：单表达式自动返回；多行代码赋值给 result。\n"
+                "示例：\n"
+                "  result = latest(ta.rsi(df.close, 14))\n"
+                "  result = int(equity * 0.02 / latest(ta.atr(df.high, df.low, df.close, 14)))"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "要执行的 Python 代码",
+                    },
+                    "symbol": {
+                        "type": "string",
+                        "description": "指定主数据源的股票代码（默认主资产）",
+                    },
+                },
+                "required": ["code"],
+            },
+        },
+    },
 ]
 
 
@@ -257,6 +300,7 @@ class ToolKit:
             "order_cancel": self._order_cancel,
             "order_query": self._order_query,
             "market_history": self._market_history,
+            "compute": self._compute,
         }
         handler = handlers.get(name)
         if handler is None:
@@ -366,3 +410,32 @@ class ToolKit:
         bars = args["bars"]
         symbol = args.get("symbol")
         return {"history": self._engine.market_history(bars, symbol)}
+
+    def _compute(self, args: dict) -> dict:
+        code = args["code"]
+        symbol = args.get("symbol", self._engine._symbol)
+        bar_index = self._engine._bar_index
+
+        # 主数据源：截断到 bar_index 防前瞻
+        primary_df = self._engine._data_by_symbol.get(symbol)
+        if primary_df is None:
+            return {"error": f"symbol {symbol!r} 不存在"}
+        df = primary_df.iloc[: bar_index + 1]
+
+        # 多资产数据：全部截断
+        extra_dfs: dict = {}
+        for sym, sym_df in self._engine._data_by_symbol.items():
+            extra_dfs[sym] = sym_df.iloc[: bar_index + 1]
+
+        # 账户快照
+        snap = self._engine.account_snapshot()
+        account = {
+            "cash": snap.cash,
+            "equity": snap.equity,
+            "positions": {
+                s: {"size": p.size, "avg_price": p.avg_price}
+                for s, p in snap.positions.items()
+            },
+        }
+
+        return exec_compute(code, df, account, extra_dfs=extra_dfs)
