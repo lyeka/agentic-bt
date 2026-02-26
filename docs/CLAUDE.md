@@ -13,6 +13,7 @@ context.md: 上下文工程，六层分层注入，市场数据格式，token �
 eval.md: 三维评估体系，绩效/遵循度/一致性，A/B 测试矩阵
 agent-protocol.md: AgentProtocol 接口规范，Decision 数据结构，多种 Agent 类型
 runner.md: 回测编排器，主循环流程，触发策略，框架驱动记忆时刻，矩阵实验
+tracer.md: Agent 可观测性，trace.jsonl 格式定义，对齐 OTel GenAI Semantic Conventions，观测点注入
 roadmap.md: 开发路线图，MVP 范围定义，V2/V3/V4 演进规划
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

@@ -9,8 +9,9 @@
 `memory.py`: 文件式记忆系统，Workspace 隔离 + Memory(log/note/recall)
 `tools.py`: ToolKit，OpenAI function calling schema + 工具分发 + 调用追踪；含 market_history 工具
 `context.py`: ContextManager，五层认知上下文组装与格式化；assemble() → Context，_format_text() → formatted_text
-`agent.py`: LLMAgent，ReAct loop（OpenAI SDK 兼容），AgentProtocol 接口；context: Context 类型
-`runner.py`: Runner 回测主循环；集成 ContextManager，传入决策历史组装近期决策
+`agent.py`: LLMAgent，ReAct loop（OpenAI SDK 兼容），AgentProtocol 接口；支持 TraceWriter 注入追踪 llm_call/tool_call
+`runner.py`: Runner 回测主循环；集成 ContextManager + TraceWriter，追踪 agent_step/context/decision；decision_to_dict 完整持久化
+`tracer.py`: TraceWriter 本地 JSONL 追踪写入器 + decision_to_dict 序列化；对齐 OTel GenAI Semantic Conventions
 `eval.py`: Evaluator，绩效指标(trade_log 真实盈亏) + 遵循度报告计算
 `data.py`: load_csv 标准化加载 + make_sample_data 模拟数据生成
 

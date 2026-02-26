@@ -1,6 +1,6 @@
 """
-[INPUT]: openai, agenticbt.models, agenticbt.tools
-[OUTPUT]: LLMAgent — ReAct loop 实现（含指数退避重试）；AgentProtocol — 接口定义
+[INPUT]: openai, agenticbt.models, agenticbt.tools, agenticbt.tracer
+[OUTPUT]: LLMAgent — ReAct loop 实现（含指数退避重试 + trace 写入）；AgentProtocol — 接口定义
 [POS]: Agent 层，唯一直接调用 LLM API 的组件，被 runner 驱动；_call_llm() 封装重试逻辑
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -16,6 +16,7 @@ import openai
 
 from .models import Context, Decision, ToolCall
 from .tools import ToolKit
+from .tracer import TraceWriter
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -47,6 +48,7 @@ class LLMAgent:
         api_key: str | None = None,
         max_rounds: int = 15,
         temperature: float = 0.0,
+        trace: TraceWriter | None = None,
     ) -> None:
         self.model = model
         self.max_rounds = max_rounds
@@ -55,6 +57,7 @@ class LLMAgent:
             api_key=api_key or "dummy",  # 防止 SDK 因缺少 key 报错
         )
         self._temperature = temperature
+        self._trace = trace
 
     def decide(self, context: Context, toolkit: ToolKit) -> Decision:
         """ReAct loop：工具调用 → 继续，stop → 终止"""
@@ -66,14 +69,30 @@ class LLMAgent:
         final_text = ""
         total_tokens = 0
 
-        for _ in range(self.max_rounds):
-            # B3: 使用带重试的 LLM 调用
+        for round_num in range(1, self.max_rounds + 1):
+            t_llm = time.time()
             response = self._call_llm(messages, toolkit.schemas)
+            llm_ms = (time.time() - t_llm) * 1000
             if response is None:
                 break
             choice = response.choices[0]
-            total_tokens += response.usage.total_tokens if response.usage else 0
+            round_tokens = response.usage.total_tokens if response.usage else 0
+            total_tokens += round_tokens
             messages.append(choice.message)
+
+            # 追踪：LLM 调用
+            if self._trace:
+                self._trace.write({
+                    "type": "llm_call",
+                    "round": round_num,
+                    "model": self.model,
+                    "input_messages": _safe_messages(messages[:-1]),
+                    "output_content": choice.message.content,
+                    "output_tool_calls": _safe_tool_calls(choice.message.tool_calls),
+                    "finish_reason": choice.finish_reason,
+                    "tokens": {"input": 0, "output": 0, "total": round_tokens},
+                    "duration_ms": llm_ms,
+                })
 
             if choice.finish_reason == "stop":
                 final_text = choice.message.content or ""
@@ -81,10 +100,22 @@ class LLMAgent:
 
             if choice.message.tool_calls:
                 for tc in choice.message.tool_calls:
-                    result = toolkit.execute(
-                        tc.function.name,
-                        json.loads(tc.function.arguments),
-                    )
+                    args = json.loads(tc.function.arguments)
+                    t_tool = time.time()
+                    result = toolkit.execute(tc.function.name, args)
+                    tool_ms = (time.time() - t_tool) * 1000
+
+                    # 追踪：工具调用
+                    if self._trace:
+                        self._trace.write({
+                            "type": "tool_call",
+                            "round": round_num,
+                            "tool": tc.function.name,
+                            "input": args,
+                            "output": result,
+                            "duration_ms": tool_ms,
+                        })
+
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.id,
@@ -155,4 +186,32 @@ class LLMAgent:
             tokens_used=tokens,
             latency_ms=latency_ms,
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Trace 序列化辅助
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _safe_messages(messages: list) -> list[dict]:
+    """将 messages 列表转为 JSON-safe dict（处理 OpenAI 对象）"""
+    result = []
+    for m in messages:
+        if isinstance(m, dict):
+            result.append(m)
+        else:
+            result.append({"role": getattr(m, "role", "?"),
+                           "content": getattr(m, "content", "")})
+    return result
+
+
+def _safe_tool_calls(tool_calls: list | None) -> list[dict] | None:
+    """将 OpenAI tool_call 对象转为 JSON-safe list"""
+    if not tool_calls:
+        return None
+    return [
+        {"id": getattr(tc, "id", ""),
+         "name": tc.function.name,
+         "args": tc.function.arguments}
+        for tc in tool_calls
+    ]
 

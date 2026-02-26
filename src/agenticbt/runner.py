@@ -1,7 +1,7 @@
 """
-[INPUT]: agenticbt.engine, agenticbt.memory, agenticbt.tools, agenticbt.models, agenticbt.eval, agenticbt.context
+[INPUT]: agenticbt.engine, agenticbt.memory, agenticbt.tools, agenticbt.models, agenticbt.eval, agenticbt.context, agenticbt.tracer
 [OUTPUT]: Runner — 回测主循环编排器
-[POS]: 顶层编排器，连接 Engine/Memory/Agent/Eval；_trigger_memory_moments() 在成交时写入记忆
+[POS]: 顶层编排器，连接 Engine/Memory/Agent/Eval；_trigger_memory_moments() 在成交时写入记忆；内置 TraceWriter 追踪
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -20,6 +20,7 @@ from .eval import Evaluator
 from .memory import Memory, Workspace
 from .models import BacktestConfig, BacktestResult, Decision
 from .tools import ToolKit
+from .tracer import TraceWriter, decision_to_dict
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -48,6 +49,7 @@ class Runner:
         ctx_mgr = ContextManager(config.context_config)
         decisions: list[Decision] = []
         t0 = datetime.now()
+        trace = TraceWriter(ws.root / "trace.jsonl")
 
         decision_start_bar = config.decision_start_bar
         if decision_start_bar < 0:
@@ -72,8 +74,20 @@ class Runner:
                 self._trigger_memory_moments(memory, events, engine._bar_index, bar_dt)
                 continue
 
+            # 追踪：agent_step
+            trace.set_bar(engine._bar_index)
+            trace.write({"type": "agent_step", "dt": bar_dt})
+
             # 组装上下文（传入已积累的决策历史）
             context = ctx_mgr.assemble(engine, memory, engine._bar_index, events, decisions)
+
+            # 追踪：context
+            trace.write({
+                "type": "context",
+                "formatted_text": context.formatted_text,
+                "market": context.market,
+                "account": context.account,
+            })
 
             # 工具包（每次决策独立实例）
             toolkit = ToolKit(engine=engine, memory=memory)
@@ -83,6 +97,9 @@ class Runner:
             decision = agent.decide(context, toolkit)
             print(f"{decision.action:<5}  tokens={decision.tokens_used}", flush=True)
             decisions.append(decision)
+
+            # 追踪：decision
+            trace.write({"type": "decision", **decision_to_dict(decision)})
 
             # F1: 成交事件驱动记忆写入
             self._trigger_memory_moments(memory, events, engine._bar_index, bar_dt)
@@ -128,17 +145,9 @@ class Runner:
 
     def _record_decision(self, ws: Workspace, decision: Decision) -> None:
         jsonl_path = ws.root / "decisions.jsonl"
-        record = {
-            "datetime": decision.datetime.isoformat() if isinstance(decision.datetime, datetime) else str(decision.datetime),
-            "bar_index": decision.bar_index,
-            "action": decision.action,
-            "symbol": decision.symbol,
-            "quantity": decision.quantity,
-            "reasoning": decision.reasoning,
-            "tokens_used": decision.tokens_used,
-        }
+        record = decision_to_dict(decision)
         with open(jsonl_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
     def _save_result(self, ws: Workspace, result: BacktestResult) -> None:
         result_path = ws.root / "result.json"

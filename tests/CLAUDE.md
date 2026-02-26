@@ -19,5 +19,7 @@
 `test_runner.py`: runner.feature step definitions（mock Agent，context: Context 类型）
 `test_eval.py`: eval.feature step definitions
 `test_context.py`: context.feature step definitions（fixture: cctx）
+`features/tracer.feature`: 可观测性追踪行为规格（7 scenarios）
+`test_tracer.py`: tracer.feature step definitions（fixture: trcx）
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
