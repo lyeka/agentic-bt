@@ -171,7 +171,7 @@ def _run_strategy(
         print(f"模式: Mock Agent | regime={strat.regime} | bars={strat.bars}")
     else:
         base_url, api_key, model = _resolve_provider(args.provider, args.model)
-        agent = LLMAgent(model=model, base_url=base_url, api_key=api_key, max_rounds=5)
+        agent = LLMAgent(model=model, base_url=base_url, api_key=api_key, max_rounds=strat.max_rounds)
         print(f"策略: {strat.name} — {strat.description}")
         print(f"模式: LLM Agent ({args.provider} / {model})")
 

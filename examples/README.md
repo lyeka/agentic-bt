@@ -14,8 +14,9 @@ python demo.py --mock --strategy bracket_atr
 # 全量 mock 对比
 python demo.py --mock --strategy all
 
-# LLM 真实回测
-ANTHROPIC_API_KEY=sk-ant-... python demo.py --strategy free_play
+# LLM 真实回测（API key 配置在 .env 中，demo.py 自动加载）
+python demo.py --provider openai --model deepseek-chat --strategy free_play
+python demo.py --strategy reflective
 
 # 自动化 E2E 测试
 .venv/bin/pytest tests/test_e2e_strategies.py -v

@@ -52,7 +52,7 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "indicator_calc",
-            "description": "计算技术指标",
+            "description": "计算技术指标（RSI/SMA/EMA/ATR 用 period 参数；MACD 用 fast/slow/signal 参数，忽略 period）",
             "parameters": {
                 "type": "object",
                 "properties": {

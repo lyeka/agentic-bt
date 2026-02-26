@@ -39,6 +39,7 @@ class StrategyDef:
     seed: int
     bars: int
     decision_start_bar: int = 14
+    max_rounds: int = 15                   # LLMAgent 最大 ReAct 轮次
     symbol: str = "AAPL"
     risk: RiskConfig = field(default_factory=RiskConfig)
     features: list[str] = field(default_factory=list)
@@ -393,20 +394,19 @@ _PROMPT_MULTI_ASSET = (
 )
 
 _PROMPT_FREE_PLAY = (
-    "你是一位自主交易员。你可以使用以下工具：\n"
-    "- market_observe / market_history：观察市场\n"
-    "- indicator_calc：计算任意技术指标（RSI/SMA/EMA/ATR/MACD/BBANDS）\n"
-    "- account_status：查看账户\n"
-    "- trade_execute：执行交易（支持市价/限价/止损/bracket 订单）\n"
-    "- memory_log / memory_note / memory_recall：记忆系统\n"
-    "- order_query / order_cancel：挂单管理\n\n"
-    "没有预设规则。你自己决定：\n"
-    "1. 观察什么数据\n"
-    "2. 使用什么指标\n"
-    "3. 何时买入、卖出、观望\n"
-    "4. 如何管理风险\n"
-    "5. 如何利用记忆系统\n\n"
-    "唯一目标：在回测期间实现正收益。展示你的交易智慧。"
+    "你是一位天生的赌徒型交易员。你热爱风险，享受每一次下注的快感。\n"
+    "对你来说，空仓就是最大的风险——错过行情比亏损更让你难受。\n\n"
+    "你的工具箱：\n"
+    "- indicator_calc：技术指标（RSI/SMA/EMA/ATR/MACD/BBANDS）\n"
+    "- trade_execute：下单（buy/sell/close，市价/限价/止损/bracket 都行）\n"
+    "- account_status：看看还有多少子弹\n"
+    "- memory_log / memory_note / memory_recall：记住你的战绩\n"
+    "- order_query / order_cancel：管理挂单\n"
+    "- market_history：翻翻历史 K 线\n\n"
+    "行情数据已在上方提供，无需调用 market_observe。\n"
+    "看 1-2 个指标就够了，别磨叽，快点出手。\n\n"
+    "你的信条：市场奖励行动者，惩罚犹豫者。\n"
+    "唯一目标：赚钱。大胆交易，享受过程。"
 )
 
 _PROMPT_REFLECTIVE = (
@@ -481,6 +481,7 @@ STRATEGIES: dict[str, StrategyDef] = {
         mock_cls=None,
         llm_prompt=_PROMPT_FREE_PLAY,
         regime="random", seed=42, bars=60,
+        max_rounds=25,
         features=["全工具链", "AI自由度最高"],
     ),
     "reflective": StrategyDef(
@@ -489,6 +490,7 @@ STRATEGIES: dict[str, StrategyDef] = {
         mock_cls=None,
         llm_prompt=_PROMPT_REFLECTIVE,
         regime="random", seed=42, bars=80,
+        max_rounds=25,
         features=["记忆系统深度", "自我反思"],
     ),
 }

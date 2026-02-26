@@ -44,6 +44,8 @@ class IndicatorEngine:
         if name_upper == "ATR":
             return self._atr(subset, **params)
         if name_upper == "MACD":
+            # MACD 使用 fast/slow/signal，不使用 period
+            params.pop("period", None)
             return self._macd(subset, **params)
         if name_upper == "BBANDS":
             return self._bbands(subset, **params)
@@ -95,10 +97,14 @@ class IndicatorEngine:
             return {"upper": None, "mid": None, "lower": None}
         row = result.iloc[-1]
         cols = result.columns.tolist()
+        # pandas_ta 返回 [BBL, BBM, BBU, BBB, BBP]，用列名前缀匹配
+        lower_col = next(c for c in cols if c.startswith("BBL"))
+        mid_col   = next(c for c in cols if c.startswith("BBM"))
+        upper_col = next(c for c in cols if c.startswith("BBU"))
         return {
-            "upper": None if _is_nan(row[cols[0]]) else float(row[cols[0]]),
-            "mid": None if _is_nan(row[cols[1]]) else float(row[cols[1]]),
-            "lower": None if _is_nan(row[cols[2]]) else float(row[cols[2]]),
+            "upper": None if _is_nan(row[upper_col]) else float(row[upper_col]),
+            "mid":   None if _is_nan(row[mid_col])   else float(row[mid_col]),
+            "lower": None if _is_nan(row[lower_col])  else float(row[lower_col]),
         }
 
 

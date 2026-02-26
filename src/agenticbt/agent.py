@@ -132,7 +132,11 @@ class LLMAgent:
                     })
         else:
             # max_rounds 耗尽，用最后一次 LLM 推理；无推理则标记强制 hold
-            final_text = last_reasoning or f"超过最大轮次（{self.max_rounds}轮），强制 hold"
+            final_text = (
+                f"[max_rounds={self.max_rounds} 耗尽，强制 hold] {last_reasoning}"
+                if last_reasoning
+                else f"超过最大轮次（{self.max_rounds}轮），强制 hold"
+            )
 
         latency_ms = (time.time() - t0) * 1000
         return self._build_decision(context, toolkit, final_text, total_tokens, latency_ms)
