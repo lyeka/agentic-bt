@@ -167,7 +167,7 @@ class BacktestConfig:
     risk: RiskConfig = field(default_factory=RiskConfig)
     commission: CommissionConfig = field(default_factory=CommissionConfig)
     slippage: SlippageConfig = field(default_factory=SlippageConfig)
-    max_agent_rounds: int = 5       # ReAct loop 最大轮次
+    max_agent_rounds: int = 15      # ReAct loop 最大轮次
     decision_start_bar: int = 0     # 从该 bar index 开始触发 agent 决策
     context_config: "ContextConfig" = field(default_factory=lambda: ContextConfig())
 
@@ -181,7 +181,7 @@ class ContextConfig:
     """上下文组装配置 — 窗口大小和截断阈值"""
     recent_bars_window: int = 20        # 静态注入的 K 线窗口
     recent_decisions_window: int = 3
-    reasoning_max_chars: int = 80
+    reasoning_max_chars: int = 200
 
 
 @dataclass

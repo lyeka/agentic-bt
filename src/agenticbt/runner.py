@@ -50,6 +50,8 @@ class Runner:
         decisions: list[Decision] = []
         t0 = datetime.now()
         trace = TraceWriter(ws.root / "trace.jsonl")
+        if hasattr(agent, "trace"):
+            agent.trace = trace
 
         decision_start_bar = config.decision_start_bar
         if decision_start_bar < 0:

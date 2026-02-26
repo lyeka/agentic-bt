@@ -57,7 +57,7 @@ class LLMAgent:
             api_key=api_key or "dummy",  # 防止 SDK 因缺少 key 报错
         )
         self._temperature = temperature
-        self._trace = trace
+        self.trace = trace
 
     def decide(self, context: Context, toolkit: ToolKit) -> Decision:
         """ReAct loop：工具调用 → 继续，stop → 终止"""
@@ -68,6 +68,7 @@ class LLMAgent:
         ]
         final_text = ""
         total_tokens = 0
+        last_reasoning = ""
 
         for round_num in range(1, self.max_rounds + 1):
             t_llm = time.time()
@@ -80,9 +81,13 @@ class LLMAgent:
             total_tokens += round_tokens
             messages.append(choice.message)
 
+            # 捕获 LLM 推理文本（tool_calls 轮次也可能带 content）
+            if choice.message.content:
+                last_reasoning = choice.message.content
+
             # 追踪：LLM 调用
-            if self._trace:
-                self._trace.write({
+            if self.trace:
+                self.trace.write({
                     "type": "llm_call",
                     "round": round_num,
                     "model": self.model,
@@ -106,8 +111,8 @@ class LLMAgent:
                     tool_ms = (time.time() - t_tool) * 1000
 
                     # 追踪：工具调用
-                    if self._trace:
-                        self._trace.write({
+                    if self.trace:
+                        self.trace.write({
                             "type": "tool_call",
                             "round": round_num,
                             "tool": tc.function.name,
@@ -122,8 +127,8 @@ class LLMAgent:
                         "content": json.dumps(result, default=str),
                     })
         else:
-            # max_rounds 耗尽，强制 hold
-            final_text = "超过最大轮次，强制 hold"
+            # max_rounds 耗尽，用最后一次 LLM 推理；无推理则标记强制 hold
+            final_text = last_reasoning or f"超过最大轮次（{self.max_rounds}轮），强制 hold"
 
         latency_ms = (time.time() - t0) * 1000
         return self._build_decision(context, toolkit, final_text, total_tokens, latency_ms)
