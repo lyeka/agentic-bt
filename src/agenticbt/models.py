@@ -168,6 +168,7 @@ class BacktestConfig:
     commission: CommissionConfig = field(default_factory=CommissionConfig)
     slippage: SlippageConfig = field(default_factory=SlippageConfig)
     max_agent_rounds: int = 5       # ReAct loop 最大轮次
+    decision_start_bar: int = 0     # 从该 bar index 开始触发 agent 决策
     context_config: "ContextConfig" = field(default_factory=lambda: ContextConfig())
 
 

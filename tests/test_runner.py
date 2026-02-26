@@ -39,6 +39,9 @@ def test_workspace_saved(): pass
 @scenario("features/runner.feature", "成交事件触发 memory.log 写入")
 def test_fill_triggers_memory(): pass
 
+@scenario("features/runner.feature", "decision_start_bar 生效时前序 bar 不触发决策")
+def test_decision_start_bar(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -133,6 +136,10 @@ def given_context_recorder(rctx):
     rctx["agent"] = type("RecordAgent", (), {"decide": staticmethod(decide)})()
     rctx["recorded_contexts"] = recorded
     return rctx
+@given(parsers.parse("decision_start_bar 为 {n:d}"), target_fixture="rctx")
+def given_decision_start_bar(rctx, n):
+    rctx["decision_start_bar"] = n
+    return rctx
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -146,6 +153,7 @@ def when_run(rctx):
         symbol="AAPL",
         strategy_prompt=rctx.get("strategy", "test"),
         risk=RiskConfig(max_position_pct=1.0),
+        decision_start_bar=rctx.get("decision_start_bar", 0),
     )
     runner = Runner()
     rctx["result"] = runner.run(config, rctx["agent"])
@@ -212,6 +220,13 @@ def then_has_decisions(rctx):
 def then_has_result_json(rctx):
     ws = rctx["result"].workspace_path
     assert os.path.isfile(os.path.join(ws, "result.json"))
+
+
+@then(parsers.parse("首条 decision 的 bar_index 应为 {n:d}"))
+def then_first_decision_bar_index(rctx, n):
+    decisions = rctx["result"].decisions
+    assert len(decisions) > 0
+    assert decisions[0].bar_index == n
 
 
 @then("memory 日志应包含成交记录")

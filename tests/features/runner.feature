@@ -36,3 +36,11 @@ Feature: 回测编排
     And 一个 mock Agent 在 bar 0 买入 在 bar 1 卖出
     When 执行回测
     Then memory 日志应包含成交记录
+
+  Scenario: decision_start_bar 生效时前序 bar 不触发决策
+    Given 3 根 bar 的测试数据
+    And 一个 mock Agent 始终 hold
+    And decision_start_bar 为 2
+    When 执行回测
+    Then result.decisions 应有 1 条
+    And 首条 decision 的 bar_index 应为 2

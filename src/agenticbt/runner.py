@@ -49,6 +49,10 @@ class Runner:
         decisions: list[Decision] = []
         t0 = datetime.now()
 
+        decision_start_bar = config.decision_start_bar
+        if decision_start_bar < 0:
+            raise ValueError("decision_start_bar 必须 >= 0")
+
         pending_events: list[dict] = []
 
         while engine.has_next():
@@ -63,6 +67,11 @@ class Runner:
             ] + pending_events
             pending_events = []
 
+            bar_dt = str(bar.datetime)[:10]
+            if engine._bar_index < decision_start_bar:
+                self._trigger_memory_moments(memory, events, engine._bar_index, bar_dt)
+                continue
+
             # 组装上下文（传入已积累的决策历史）
             context = ctx_mgr.assemble(engine, memory, engine._bar_index, events, decisions)
 
@@ -70,7 +79,6 @@ class Runner:
             toolkit = ToolKit(engine=engine, memory=memory)
 
             # Agent 决策
-            bar_dt = str(context.datetime)[:10]
             print(f"  bar {engine._bar_index:>3} {bar_dt} ...", end=" ", flush=True)
             decision = agent.decide(context, toolkit)
             print(f"{decision.action:<5}  tokens={decision.tokens_used}", flush=True)
