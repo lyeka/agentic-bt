@@ -230,13 +230,17 @@ _SCHEMAS = [
         "function": {
             "name": "compute",
             "description": (
-                "Python 计算沙箱。每次调用独立命名空间。"
-                "预加载: df(OHLCV), pd, np, ta(=pandas_ta, 已注入禁止import), math, cash, equity, positions。"
-                "Helpers: latest(s)→标量, prev(s,n), crossover(fast,slow)→bool, "
-                "bbands(close,length,std)→(upper,mid,lower), macd(close)→(macd,signal,hist)。"
-                "⚠ ta.macd()/ta.bbands() 返回 DataFrame 不可解包，必须用 helper。"
-                "单表达式自动返回；多行赋值给 result。"
-                "示例: result={'rsi':latest(ta.rsi(df.close,14)), 'bb':bbands(df.close,20,2)}"
+                "Python 计算沙箱（通用分析终端，不是指标菜单）。每次调用独立命名空间。"
+                "预加载: df(OHLCV), open/high/low/close/volume/date, "
+                "account/cash/equity/positions, pd, np, ta(=pandas_ta), math。"
+                "Helpers: latest, prev, crossover, crossunder, above, below, "
+                "bbands(close,length,std)→(upper,mid,lower), macd(close)→(macd,signal,hist), "
+                "tail(x,n)→list, nz(x,default)→标量。"
+                "返回: 单表达式自动返回；多行代码最后一行若为表达式也会返回；也可显式设置 result。"
+                "序列化: Series 自动取最新值；DataFrame/长数组自动摘要（不会爆 token）。"
+                "可选参数: symbol(股票代码，默认主资产)，用于选择本次 compute 的数据源。"
+                "示例(自定义指标): result={'rsi':ta.rsi(close,14), "
+                "'factor':close.pct_change(10)/(close.pct_change().rolling(20).std()+1e-9)}"
             ),
             "parameters": {
                 "type": "object",
@@ -247,7 +251,7 @@ _SCHEMAS = [
                     },
                     "symbol": {
                         "type": "string",
-                        "description": "指定主数据源的股票代码（默认主资产）",
+                        "description": "股票代码（默认主资产）。多资产回测中可用来选择要分析的标的。",
                     },
                 },
                 "required": ["code"],
@@ -429,13 +433,17 @@ class ToolKit:
         # 主数据源：截断到 bar_index 防前瞻
         primary_df = self._engine._data_by_symbol.get(symbol)
         if primary_df is None:
-            return {"error": f"symbol {symbol!r} 不存在"}
+            return {
+                "error": f"symbol {symbol!r} 不存在",
+                "_meta": {
+                    "rules_version": "compute_v2",
+                    "symbol": symbol,
+                    "bar_index": bar_index,
+                    "df_rows": 0,
+                    "columns": [],
+                },
+            }
         df = primary_df.iloc[: bar_index + 1]
-
-        # 多资产数据：全部截断
-        extra_dfs: dict = {}
-        for sym, sym_df in self._engine._data_by_symbol.items():
-            extra_dfs[sym] = sym_df.iloc[: bar_index + 1]
 
         # 账户快照
         snap = self._engine.account_snapshot()
@@ -448,6 +456,12 @@ class ToolKit:
             },
         }
 
-        result = exec_compute(code, df, account, extra_dfs=extra_dfs)
-        result["_meta"] = {"df_rows": len(df), "columns": list(df.columns)}
+        result = exec_compute(code, df, account)
+        result["_meta"] = {
+            "rules_version": "compute_v2",
+            "symbol": symbol,
+            "bar_index": bar_index,
+            "df_rows": len(df),
+            "columns": list(df.columns),
+        }
         return result

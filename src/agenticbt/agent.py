@@ -181,7 +181,7 @@ class LLMAgent:
 
 <tools_guide>
 分析阶段：
-  compute — Python 计算终端，推荐一次性计算多个指标（每次调用独立沙箱，变量不跨调用保留）
+  compute — Python 计算终端（不是指标菜单）。可用 close/open/high/low/volume/date 别名；多行最后表达式会自动返回；推荐一次性计算多个指标（每次调用独立沙箱，变量不跨调用保留）
   indicator_calc — 单指标快捷计算（适合只需一个指标的场景）
   market_history — 完整 OHLCV 历史（仅当需要比 df 更细粒度分析时使用）
 
@@ -296,4 +296,3 @@ def _safe_tool_calls(tool_calls: list | None) -> list[dict] | None:
          "args": tc.function.arguments}
         for tc in tool_calls
     ]
-

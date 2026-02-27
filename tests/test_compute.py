@@ -22,8 +22,14 @@ from agenticbt.tools import ToolKit
 @scenario("features/compute.feature", "单表达式计算（eval 模式）")
 def test_eval_expression(): pass
 
+@scenario("features/compute.feature", "close 别名可用")
+def test_close_alias(): pass
+
 @scenario("features/compute.feature", "多行代码计算（exec 模式）")
 def test_exec_multiline(): pass
+
+@scenario("features/compute.feature", "多行最后表达式自动返回")
+def test_repl_last_expr(): pass
 
 @scenario("features/compute.feature", "使用预置 helper 函数")
 def test_helper_functions(): pass
@@ -37,8 +43,11 @@ def test_account_toplevel(): pass
 @scenario("features/compute.feature", "账户数据通过 dict 访问")
 def test_account_dict(): pass
 
-@scenario("features/compute.feature", "多资产数据注入")
-def test_multi_asset(): pass
+@scenario("features/compute.feature", "symbol 参数选择数据源（单次仍为单资产）")
+def test_symbol_selects_data_source(): pass
+
+@scenario("features/compute.feature", "symbol 不存在返回错误")
+def test_symbol_missing_error(): pass
 
 @scenario("features/compute.feature", "防前瞻 — 数据截断到当前 bar")
 def test_anti_lookahead(): pass
@@ -69,6 +78,17 @@ def test_series_auto_latest(): pass
 
 @scenario("features/compute.feature", "numpy 类型自动转 float")
 def test_numpy_to_float(): pass
+
+@scenario("features/compute.feature", "dict 深度序列化（Series/numpy 标量）")
+def test_deep_serialize_dict(): pass
+
+
+@scenario("features/compute.feature", "DataFrame 返回摘要")
+def test_dataframe_summary(): pass
+
+
+@scenario("features/compute.feature", "长数组自动摘要")
+def test_array_summary(): pass
 
 
 @scenario("features/compute.feature", "print 输出通过 _stdout 返回")
@@ -165,12 +185,27 @@ def when_compute_inline(cptx, code):
     return cptx
 
 
+@when(parsers.parse('调用 compute symbol "{symbol}" 代码 "{code}"'), target_fixture="cptx")
+def when_compute_with_symbol(cptx, symbol, code):
+    cptx["result"] = cptx["kit"].execute("compute", {"code": code, "symbol": symbol})
+    cptx["results"].append(cptx["result"])
+    return cptx
+
+
 @when("调用 compute 多行代码计算 sma 和 above", target_fixture="cptx")
 def when_compute_multiline(cptx):
     code = (
         "sma = df.close.rolling(20).mean().iloc[-1]\n"
         "result = {'sma': sma, 'above': df.close.iloc[-1] > sma}"
     )
+    cptx["result"] = cptx["kit"].execute("compute", {"code": code})
+    cptx["results"].append(cptx["result"])
+    return cptx
+
+
+@when("调用 compute 多行最后表达式返回", target_fixture="cptx")
+def when_compute_last_expr(cptx):
+    code = "x = np.mean(close)\nx"
     cptx["result"] = cptx["kit"].execute("compute", {"code": code})
     cptx["results"].append(cptx["result"])
     return cptx
@@ -216,6 +251,14 @@ def when_compute_try_except(cptx):
     return cptx
 
 
+@when("调用 compute dict 深度序列化", target_fixture="cptx")
+def when_compute_deep_serialize_dict(cptx):
+    code = "result = {'rsi': ta.rsi(close, 14), 'mean': np.mean(close)}"
+    cptx["result"] = cptx["kit"].execute("compute", {"code": code})
+    cptx["results"].append(cptx["result"])
+    return cptx
+
+
 @when("调用 compute bbands 后对返回值调用 latest", target_fixture="cptx")
 def when_compute_latest_bbands(cptx):
     code = "upper, mid, lower = bbands(df.close, 20, 2)\nresult = latest(upper)"
@@ -225,7 +268,7 @@ def when_compute_latest_bbands(cptx):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Given — 多资产
+# Given — 多资产（compute 仍然是单资产：通过 symbol 选择数据源）
 # ─────────────────────────────────────────────────────────────────────────────
 
 @given("初始化多资产 compute 引擎（AAPL 和 SPY）", target_fixture="cptx")
@@ -289,6 +332,16 @@ def then_returns_cash(cptx):
     assert abs(r - snap.cash) < 1e-6
 
 
+@then(parsers.parse('compute 返回值等于 symbol "{symbol}" 当前收盘价'))
+def then_returns_close_for_symbol(cptx, symbol):
+    r = cptx["result"]["result"]
+    eng = cptx["eng"]
+    df = eng._data_by_symbol[symbol]
+    expected = float(df.iloc[eng._bar_index]["close"])
+    assert isinstance(r, float)
+    assert abs(r - expected) < 1e-6
+
+
 @then("compute 返回值等于 31")
 def then_returns_31(cptx):
     r = cptx["result"]["result"]
@@ -344,6 +397,36 @@ def then_returns_index_error(cptx):
 def then_returns_python_float(cptx):
     r = cptx["result"]["result"]
     assert type(r) is float, f"expected float, got {type(r)}"
+
+
+@then("compute 返回包含 rsi mean 的 dict 且都是 float")
+def then_returns_dict_with_floats(cptx):
+    r = cptx["result"]["result"]
+    assert isinstance(r, dict), f"expected dict, got {type(r)}: {r}"
+    assert "rsi" in r
+    assert "mean" in r
+    assert type(r["rsi"]) is float, f"expected python float, got {type(r['rsi'])}: {r['rsi']}"
+    assert type(r["mean"]) is float, f"expected python float, got {type(r['mean'])}: {r['mean']}"
+
+
+@then("compute 返回 DataFrame 摘要")
+def then_returns_dataframe_summary(cptx):
+    r = cptx["result"]["result"]
+    assert isinstance(r, dict), f"expected dict summary, got {type(r)}: {r}"
+    assert r.get("_type") == "dataframe", f"expected _type=dataframe, got {r.get('_type')}: {r}"
+    assert "shape" in r and isinstance(r["shape"], list)
+    assert "columns" in r and isinstance(r["columns"], list)
+    assert "tail" in r and isinstance(r["tail"], list)
+
+
+@then("compute 返回 array 摘要")
+def then_returns_array_summary(cptx):
+    r = cptx["result"]["result"]
+    assert isinstance(r, dict), f"expected dict summary, got {type(r)}: {r}"
+    assert r.get("_type") == "array", f"expected _type=array, got {r.get('_type')}: {r}"
+    assert r.get("truncated") is True
+    assert isinstance(r.get("tail"), list)
+    assert len(r["tail"]) <= 200
 
 
 @then("compute 返回包含 _stdout 的结果")

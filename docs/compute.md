@@ -73,7 +73,7 @@ compute() 不是"阉割版 bash"，是**模拟世界的 bash**——
         },
         "symbol": {
           "type": "string",
-          "description": "指定主数据源的股票代码（默认主资产）"
+          "description": "股票代码（默认主资产）"
         }
       },
       "required": ["code"]
@@ -89,10 +89,12 @@ compute() 不是"阉割版 bash"，是**模拟世界的 bash**——
 
 ```
 在沙箱中执行 Python 代码分析市场数据。数据已截断到当前 bar，无法访问未来数据。
+这是通用分析终端（Trading Agent 的 Bash），不是“指标菜单”。
+你可以用 Python/Series 运算自由创造新指标；下方 helpers 只是快捷方式，不构成能力上限。
 
 可用变量：
-  df         — 主资产 DataFrame，列: date/open/high/low/close/volume，RangeIndex
-  df_{sym}   — 多资产场景下各资产数据（如 df_aapl, df_spy）
+  df         — DataFrame（由 symbol 选择，默认主资产），列: date/open/high/low/close/volume，RangeIndex
+  open/high/low/close/volume/date — 对应 df 列的 Series 别名（TradingView 风格）
   account    — dict: {cash, equity, positions: {symbol: {size, avg_price}}}
   cash       — 当前现金（等价于 account['cash']）
   equity     — 当前净值（等价于 account['equity']）
@@ -106,15 +108,26 @@ compute() 不是"阉割版 bash"，是**模拟世界的 bash**——
   crossunder(fast, slow)  — 死叉判断（fast 下穿 slow）
   above(series, val)      — 最新值是否大于阈值
   below(series, val)      — 最新值是否小于阈值
+  bbands(close, length, std) → (upper, mid, lower)
+  macd(close) → (macd, signal, hist)
+  tail(x, n=20)           — 取尾部 N 个元素（返回 list，用于调试）
+  nz(x, default=0.0)      — None/NaN/inf → default
 
 返回规则：
   单表达式 → 自动返回计算结果
-  多行代码 → 将结果赋值给 result 变量
+  多行代码 → 如果最后一行是表达式，会自动返回；也可以显式赋值给 result
+
+序列化（输出治理）：
+  Series → 自动取最新值
+  DataFrame/长数组 → 自动摘要（不会爆 token）
 
 示例：
-  result = latest(ta.rsi(df.close, 14))
-  result = {'rsi': latest(ta.rsi(df.close)), 'sma_cross': crossover(df.close.rolling(20).mean(), df.close.rolling(50).mean())}
-  result = int(equity * 0.02 / latest(ta.atr(df.high, df.low, df.close, 14)))
+  # 自定义因子（不是内置指标名，也能算）
+  factor = close.pct_change(10) / (close.pct_change().rolling(20).std() + 1e-9)
+  {'rsi': ta.rsi(close, 14), 'factor': factor, 'signal': latest(factor) > 0}
+
+  # 仓位计算
+  int(equity * 0.02 / nz(ta.atr(high, low, close, 14), 1.0))
 ```
 
 ## 沙箱设计
@@ -143,36 +156,33 @@ SAFE_GLOBALS = {
 `__builtins__={}` 禁用了 `__import__`、`open`、`exec`、`eval`、`print` 等所有内置函数。
 LLM 生成的代码只能使用白名单中的 `pd/np/ta/math` 和预注入的变量。
 
-### 执行策略：eval-first
+### 执行策略：eval-first + REPL（最后表达式返回）
 
 ```python
-def exec_compute(code, df, account, extra_dfs=None, timeout_ms=500):
-    try:
-        # 单表达式 → eval 直接返回值
-        value = eval(code.strip(), SAFE_GLOBALS, local_ns)
-        return {"result": _serialize(value)}
-    except SyntaxError:
-        # 多行/语句 → exec，从 local_ns 提取 result
-        exec(code, SAFE_GLOBALS, local_ns)
-        return {"result": _serialize(local_ns.get('result'))}
+def exec_compute(code, df, account, timeout_ms=500):
+    # 1) 单表达式 → eval 直接返回值
+    # 2) 多行/语句 → exec；若最后一行是表达式，则再 eval 返回（类似 Jupyter）
+    # 3) 若显式设置 result，则 result 优先
+    ...
 ```
 
-为什么 eval-first？
+为什么需要 eval-first + REPL？
 
-`exec()` 执行表达式但**丢弃返回值**。如果 Agent 写 `df.close.iloc[-1]`，
-exec 会计算但结果消失。eval-first 让单表达式自然返回，
-多行代码 fallback 到 exec + 显式 `result = ...`。
+`exec()` 会执行但不会自动返回最后表达式的值。
+REPL 语义让 Agent 写多行代码时不必总是记得 `result = ...`，
+而 eval-first 保证最常见的单表达式用法最简洁。
 
 ### 数据注入
 
 ```python
+symbol = args.get("symbol", engine._symbol)
+df = engine._data_by_symbol[symbol].iloc[:bar_index+1].copy()
 local_ns = {
     # 主数据源（截断到 bar_index，防前瞻）
-    'df': engine._data_by_symbol[symbol].iloc[:bar_index+1].copy(),
-
-    # 多资产数据（全部截断 + copy）
-    'df_aapl': engine._data_by_symbol['AAPL'].iloc[:bar_index+1].copy(),
-    'df_spy':  engine._data_by_symbol['SPY'].iloc[:bar_index+1].copy(),
+    'df': df,
+    # TradingView 风格别名（对 df 列的 Series 引用）
+    'open': df.open, 'high': df.high, 'low': df.low, 'close': df.close,
+    'volume': df.volume, 'date': df.date,
 
     # 账户状态（dict + 展开的顶层变量）
     'account': {'cash': 85000, 'equity': 102300, 'positions': {...}},
@@ -184,6 +194,8 @@ local_ns = {
     'latest': lambda s: ...,
     'prev': lambda s, n=1: ...,
     'crossover': lambda f, s: ...,
+    'tail': lambda x, n=20: ...,
+    'nz': lambda x, default=0.0: ...,
     ...
 }
 ```
@@ -191,7 +203,6 @@ local_ns = {
 关键约束：
 - `df.copy()` — 每次调用都是副本，Agent 无法篡改原始数据
 - `.iloc[:bar_index+1]` — 截断在 ToolKit._compute() 中完成，sandbox 不感知 bar_index
-- 多资产变量名：`df_{symbol.lower().replace('.','_').replace('-','_')}`
 
 ### df 的列结构
 
@@ -224,15 +235,11 @@ signal.setitimer(signal.ITIMER_REAL, timeout_ms / 1000)  # 500ms
 
 ```python
 def _serialize(value):
-    if isinstance(value, pd.Series):
-        return float(value.iloc[-1])    # Series → 最新值
-    if isinstance(value, pd.DataFrame):
-        return {"error": "DataFrame 太大，请用 .iloc[-1] 或聚合函数"}
-    if isinstance(value, (np.integer, np.floating)):
-        return float(value)             # numpy → Python float
-    if isinstance(value, (bool, np.bool_)):
-        return bool(value)              # numpy bool → Python bool
-    return value                        # scalar / dict / list / str
+    # 标量：numpy → Python，NaN/inf → None
+    # Series：自动取最新值（返回标量）
+    # DataFrame：返回摘要对象（shape/columns/tail），避免爆 token
+    # dict/list/ndarray：深度序列化 + 硬上限截断
+    ...
 ```
 
 为什么 Series 自动取最新值？
@@ -253,92 +260,63 @@ HELPERS = {
     'crossunder': lambda f, s: bool(f.iloc[-1] < s.iloc[-1] and f.iloc[-2] >= s.iloc[-2]),
     'above':      lambda s, t: bool(s.iloc[-1] > t),
     'below':      lambda s, t: bool(s.iloc[-1] < t),
+    'bbands':     lambda close, length=20, std=2.0: ...,
+    'macd':       lambda close, fast=12, slow=26, signal=9: ...,
+    'tail':       lambda x, n=20: ...,
+    'nz':         lambda x, default=0.0: ...,
 }
 ```
 
 效果：
 ```python
 # 没有 helper
-df.close.rolling(20).mean().iloc[-1] > df.close.rolling(50).mean().iloc[-1]
+close.rolling(20).mean().iloc[-1] > close.rolling(50).mean().iloc[-1]
 
 # 有 helper
-above(df.close.rolling(20).mean(), latest(df.close.rolling(50).mean()))
+above(close.rolling(20).mean(), latest(close.rolling(50).mean()))
 
 # 更简洁
-crossover(df.close.rolling(20).mean(), df.close.rolling(50).mean())
+crossover(close.rolling(20).mean(), close.rolling(50).mean())
 ```
 
 ## 可行性审查
 
-### 审查的 4 个示例及其问题
+### 典型示例（无需发明 DSL，直接用 Python 创造指标）
 
-**示例 1: 发明新指标**
+**示例 1: 自定义因子（多行 + 最后一行表达式自动返回）**
 ```python
-# 原始（有 BUG）
-compute("(df.close.rolling(20).mean() / df.close.rolling(50).mean() - 1) * 100")
-# → exec() 执行了计算但丢弃结果。local_ns 里没有 result。
-
-# 修正：eval-first 策略自动捕获表达式返回值
-compute("latest(df.close.rolling(20).mean() / df.close.rolling(50).mean() - 1) * 100")
-```
-
-**示例 2: 多资产分析**
-```python
-# 原始（需要框架支持）
-compute("df_aapl.close.pct_change().corr(df_spy.close.pct_change())")
-# → 需要框架遍历 engine._data_by_symbol 注入 df_aapl, df_spy
-
-# 修正：框架自动注入，Agent 代码不变
-compute("result = df_aapl.close.pct_change().corr(df_spy.close.pct_change())")
-```
-
-**示例 3: 仓位计算**
-```python
-# 原始（有 BUG）
 compute("""
-atr = df.close.diff().abs().rolling(14).mean().iloc[-1]
-risk_per_trade = equity * 0.02    # ← equity 未定义！
-position_size = int(risk_per_trade / (atr * 2))
-""")
-# → NameError: equity 不在命名空间中
-# → 且 result 未设置，返回 None
-
-# 修正：equity 作为顶层变量注入 + 显式设置 result
-compute("""
-result = int(equity * 0.02 / (latest(ta.atr(df.high, df.low, df.close, 14)) * 2))
+mom = close.pct_change(10)
+vol = close.pct_change().rolling(20).std()
+factor = mom / (vol + 1e-9)
+{'factor': factor, 'signal': latest(factor) > 0}
 """)
 ```
 
-**示例 4: 市场状态识别**
+**示例 2: 仓位计算（ATR + 空值平滑）**
 ```python
-# 原始（有 BUG）
-compute("""
-returns = df.close.pct_change().dropna()
-vol = returns.rolling(20).std().iloc[-1]
-trend = (df.close.iloc[-1] / df.close.iloc[-50] - 1)
-'trending' if abs(trend) > 0.1 and vol < 0.02 else 'ranging'
-""")
-# → 最后一行是表达式，exec() 丢弃结果
-# → df.close.iloc[-50] 在数据不足 50 行时 IndexError
+compute("int(equity * 0.02 / nz(ta.atr(high, low, close, 14), 1.0))")
+```
 
-# 修正：显式 result + 安全索引
+**示例 3: 市场状态识别（REPL 语义）**
+```python
 compute("""
-vol = latest(df.close.pct_change().rolling(20).std())
-trend = df.close.iloc[-1] / df.close.iloc[-min(50, len(df))] - 1
-result = 'trending' if abs(trend) > 0.1 and vol < 0.02 else 'ranging'
+vol = close.pct_change().rolling(20).std()
+trend = close.iloc[-1] / close.iloc[-min(20, len(df))] - 1
+'trending' if abs(trend) > 0.05 and nz(vol, 0.0) < 0.02 else 'ranging'
 """)
 ```
 
 ### 问题总结
 
 ```
-问题                          解法                           影响
-──────────────────────        ──────────────────────        ──────
-exec() 丢弃表达式结果          eval-first 策略                核心架构
-多资产变量未注入               遍历 _data_by_symbol 注入      数据层
-account 变量不直观             展开为顶层变量                  易用性
-Series 返回爆 token           _serialize() 自动降维          序列化
-df 列结构不透明                Tool schema 写清楚             文档
+问题                              解法                                   影响
+──────────────────────            ──────────────────────────────         ──────
+多行最后表达式“没有返回值”        REPL 语义：最后表达式自动返回             易用性
+Series/DataFrame/长数组爆 token   深度序列化 + 摘要 + 硬上限截断            稳健性
+嵌套 numpy/pandas 变字符串         深度序列化，返回 JSON-safe 结构          可解释性
+df 列名容易写错                    注入 close/open/high/low/volume/date     易用性
+compute 被误解为“指标菜单”         tool description + remediation 强声明     心智模型
 ```
 
 ## 错误处理
@@ -346,7 +324,7 @@ df 列结构不透明                Tool schema 写清楚             文档
 ```python
 # 错误类型 → 友好提示
 SyntaxError    → {"error": "SyntaxError: ...", "remediation": "检查 Python 语法"}
-NameError      → {"error": "NameError: ...", "remediation": "可用变量: df, account, cash, equity, pd, np, ta, math"}
+NameError      → {"error": "NameError: ...", "remediation": "可用变量: df, open/high/low/close/volume/date, account/cash/equity/positions, pd, np, ta, math；compute 不是指标菜单，可用代码自定义指标"}
 TimeoutError   → {"error": "计算超时（500ms）", "remediation": "简化代码或减少数据量"}
 IndexError     → {"error": "IndexError: ...", "remediation": "检查数据长度: len(df)"}
 ZeroDivision   → {"error": "ZeroDivisionError: ...", "remediation": "检查除数是否为零"}
@@ -372,11 +350,11 @@ Agent 自主选择用哪个。简单的用 indicator_calc，复杂的用 compute
 BDD 先行：Feature → RED → GREEN → Refactor
 
 ```
-Step 1  tests/features/compute.feature    Gherkin 规格（16 scenarios）
+Step 1  tests/features/compute.feature    Gherkin 行为规格
 Step 2  src/agenticbt/sandbox.py          沙箱执行器（~80 行）
 Step 3  src/agenticbt/tools.py            新增 compute 工具（schema + handler）
 Step 4  tests/test_compute.py             step definitions（fixture: cptx）
-Step 5  回归验证                           108 现有 + 16 新 scenario 全绿
+Step 5  回归验证                           全量测试用例全绿
 ```
 
 ### Phase 2+（未来）
@@ -401,17 +379,29 @@ Feature: compute — 沙箱化 Python 计算工具
 
   # ── 基础计算 ──
 
-  Scenario: 单表达式计算（eval 模式）
-    When Agent 调用 compute "df.close.iloc[-1]"
-    Then 返回当前收盘价标量
+	  Scenario: 单表达式计算（eval 模式）
+	    When Agent 调用 compute "df.close.iloc[-1]"
+	    Then 返回当前收盘价标量
 
-  Scenario: 多行代码计算（exec 模式）
-    When Agent 调用 compute:
-      """
-      sma = df.close.rolling(20).mean().iloc[-1]
-      result = {'sma': sma, 'above': df.close.iloc[-1] > sma}
-      """
-    Then 返回包含 sma 和 above 的 dict
+	  Scenario: close 别名可用
+	    When Agent 调用 compute "close.iloc[-1]"
+	    Then 返回当前收盘价标量
+
+	  Scenario: 多行代码计算（exec 模式）
+	    When Agent 调用 compute:
+	      """
+	      sma = df.close.rolling(20).mean().iloc[-1]
+	      result = {'sma': sma, 'above': df.close.iloc[-1] > sma}
+	      """
+	    Then 返回包含 sma 和 above 的 dict
+
+	  Scenario: 多行最后表达式自动返回
+	    When Agent 调用 compute:
+	      """
+	      x = np.mean(close)
+	      x
+	      """
+	    Then 返回浮点数值
 
   Scenario: 使用预置 helper 函数
     When Agent 调用 compute "latest(ta.rsi(df.close, 14))"
@@ -431,13 +421,7 @@ Feature: compute — 沙箱化 Python 计算工具
     When Agent 调用 compute "result = account['cash']"
     Then 返回值等于当前现金余额
 
-  Scenario: 多资产数据注入
-    Given 加载多资产数据 "AAPL" 和 "SPY"
-    And 推进到第 30 根 bar
-    When Agent 调用 compute "result = df_aapl.close.corr(df_spy.close)"
-    Then 返回相关系数浮点数
-
-  # ── 安全边界 ──
+	  # ── 安全边界 ──
 
   Scenario: 防前瞻 — 数据截断到当前 bar
     When Agent 调用 compute "len(df)"
@@ -476,9 +460,21 @@ Feature: compute — 沙箱化 Python 计算工具
     When Agent 调用 compute "df.close.rolling(20).mean()"
     Then 返回最新一个浮点数值
 
-  Scenario: numpy 类型自动转 float
-    When Agent 调用 compute "np.mean(df.close)"
-    Then 返回 Python float 类型
+	  Scenario: numpy 类型自动转 float
+	    When Agent 调用 compute "np.mean(df.close)"
+	    Then 返回 Python float 类型
+
+	  Scenario: dict 深度序列化（Series/numpy 标量）
+	    When Agent 调用 compute "result = {'rsi': ta.rsi(close,14), 'mean': np.mean(close)}"
+	    Then 返回包含 rsi mean 的 dict 且都是 float
+
+	  Scenario: DataFrame 返回摘要
+	    When Agent 调用 compute "df.tail(3)"
+	    Then 返回 DataFrame 摘要
+
+	  Scenario: 长数组自动摘要
+	    When Agent 调用 compute "list(range(1000))"
+	    Then 返回 array 摘要
 ```
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

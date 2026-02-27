@@ -11,9 +11,17 @@ Feature: compute — 沙箱化 Python 计算工具
     When 调用 compute "df.close.iloc[-1]"
     Then compute 返回当前收盘价标量
 
+  Scenario: close 别名可用
+    When 调用 compute "close.iloc[-1]"
+    Then compute 返回当前收盘价标量
+
   Scenario: 多行代码计算（exec 模式）
     When 调用 compute 多行代码计算 sma 和 above
     Then compute 返回包含 sma 和 above 的 dict
+
+  Scenario: 多行最后表达式自动返回
+    When 调用 compute 多行最后表达式返回
+    Then compute 返回浮点数值
 
   Scenario: 使用预置 helper 函数
     When 调用 compute "latest(ta.rsi(df.close, 14))"
@@ -33,10 +41,15 @@ Feature: compute — 沙箱化 Python 计算工具
     When 调用 compute "account['cash']"
     Then compute 返回值等于当前现金余额
 
-  Scenario: 多资产数据注入
+  Scenario: symbol 参数选择数据源（单次仍为单资产）
     Given 初始化多资产 compute 引擎（AAPL 和 SPY）
-    When 调用 compute "result = df_aapl.close.corr(df_spy.close)"
-    Then compute 返回浮点数值
+    When 调用 compute symbol "SPY" 代码 "close.iloc[-1]"
+    Then compute 返回值等于 symbol "SPY" 当前收盘价
+
+  Scenario: symbol 不存在返回错误
+    When 调用 compute symbol "SPY" 代码 "close.iloc[-1]"
+    Then compute 返回包含 error 的结果
+    And compute 返回包含 _meta 的错误结果
 
   # ── 安全边界 ──
 
@@ -84,6 +97,18 @@ Feature: compute — 沙箱化 Python 计算工具
   Scenario: numpy 类型自动转 float
     When 调用 compute "np.mean(df.close)"
     Then compute 返回 Python float 类型
+
+  Scenario: dict 深度序列化（Series/numpy 标量）
+    When 调用 compute dict 深度序列化
+    Then compute 返回包含 rsi mean 的 dict 且都是 float
+
+  Scenario: DataFrame 返回摘要
+    When 调用 compute "df.tail(3)"
+    Then compute 返回 DataFrame 摘要
+
+  Scenario: 长数组自动摘要
+    When 调用 compute "list(range(1000))"
+    Then compute 返回 array 摘要
 
   # ── 标准 Python 能力 ──
 
