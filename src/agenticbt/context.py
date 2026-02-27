@@ -55,6 +55,8 @@ class ContextManager:
             for d in all_decisions[-self._cfg.recent_decisions_window:]
         ]
 
+        risk = engine.risk_summary()
+
         ctx = Context(
             playbook=playbook,
             position_notes=position_notes,
@@ -81,6 +83,7 @@ class ContextManager:
                     for sym, p in acc.positions.items()
                 },
             },
+            risk_summary=risk,
             pending_orders=pending_orders,
             recent_bars=recent_bars,
             events=events,
@@ -109,6 +112,18 @@ class ContextManager:
             f'{positions}',
             '</account>',
         ]
+
+        # 风控约束（条件注入：空仓且有买入空间时渲染）
+        rs = ctx.risk_summary
+        if rs and rs.get("max_buy_qty", 0) > 0 and not a["positions"]:
+            pct = rs["max_position_pct"]
+            parts += [
+                '',
+                f'<risk max_position_pct="{pct:.0%}" max_buy_qty="{rs["max_buy_qty"]}" '
+                f'positions="{rs["open_positions"]}/{rs["max_open_positions"]}">',
+                f'{m["symbol"]} 可买≈{rs["max_buy_qty"]}股',
+                '</risk>',
+            ]
 
         # 近期 K 线走势（完整 OHLCV 表格）
         if ctx.recent_bars:

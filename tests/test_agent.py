@@ -184,6 +184,7 @@ def when_decide(actx):
             "equity": 100_000.0,
             "positions": {},
         },
+        risk_summary={"max_position_pct": 0.2, "max_buy_qty": 100, "max_open_positions": 10, "open_positions": 0},
         pending_orders=[],
         recent_bars=[],
         events=[],

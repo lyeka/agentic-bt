@@ -549,6 +549,21 @@ class Engine:
         """当前 bar 收盘价（公共接口，供 ContextManager 计算盈亏）"""
         return self._current_bar(symbol).close
 
+    def risk_summary(self, symbol: str | None = None) -> dict[str, Any]:
+        """公开风控约束摘要，供 ContextManager 注入 Agent 上下文"""
+        sym = symbol or self._symbol
+        equity = self._equity()
+        price = self._current_bar(sym).close
+        pos = self._positions.get(sym)
+        used = pos.size * price if pos else 0
+        avail = equity * self._risk.max_position_pct - used
+        return {
+            "max_position_pct": self._risk.max_position_pct,
+            "max_buy_qty": max(0, int(avail / price)) if price > 0 else 0,
+            "max_open_positions": self._risk.max_open_positions,
+            "open_positions": len(self._positions),
+        }
+
     def _current_bar(self, symbol: str | None = None) -> Bar:
         sym = symbol or self._symbol
         data = self._data_by_symbol.get(sym, self._data)

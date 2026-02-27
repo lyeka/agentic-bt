@@ -98,6 +98,7 @@ _SCHEMAS = [
                 "action: buy/sell/close。close 时无需 quantity。"
                 "支持 bracket: 同时传 stop_loss + take_profit 自动创建 OCO 保护单。"
                 "返回 {status, order_id} 或 {status: rejected, reason}。"
+                "风控拒绝返回 {status:rejected, reason, max_allowed_qty}，用 max_allowed_qty 重试即可。"
             ),
             "parameters": {
                 "type": "object",
@@ -229,11 +230,13 @@ _SCHEMAS = [
         "function": {
             "name": "compute",
             "description": (
-                "Python 计算沙箱。每次调用是独立命名空间。"
-                "预加载: df(OHLCV), pd, np, ta, math, account, cash, equity, positions。"
-                "Helpers: latest(s), prev(s,n), crossover(f,s), bbands(close,l,std), macd(close)。"
-                "单表达式自动返回；多行代码赋值给 result。"
-                "返回 {result: ..., _meta: {df_rows, columns}} 或 {error: str}。"
+                "Python 计算沙箱。每次调用独立命名空间。"
+                "预加载: df(OHLCV), pd, np, ta(=pandas_ta, 已注入禁止import), math, cash, equity, positions。"
+                "Helpers: latest(s)→标量, prev(s,n), crossover(fast,slow)→bool, "
+                "bbands(close,length,std)→(upper,mid,lower), macd(close)→(macd,signal,hist)。"
+                "⚠ ta.macd()/ta.bbands() 返回 DataFrame 不可解包，必须用 helper。"
+                "单表达式自动返回；多行赋值给 result。"
+                "示例: result={'rsi':latest(ta.rsi(df.close,14)), 'bb':bbands(df.close,20,2)}"
             ),
             "parameters": {
                 "type": "object",

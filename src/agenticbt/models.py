@@ -197,6 +197,7 @@ class Context:
     decision_count: int
     market: dict[str, Any]
     account: dict[str, Any]
+    risk_summary: dict[str, Any]
     pending_orders: list[dict[str, Any]]
     # 短期记忆层
     recent_bars: list[dict[str, Any]]
