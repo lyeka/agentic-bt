@@ -252,3 +252,14 @@ Feature: 确定性市场模拟引擎
     When 推进到第 25 根 bar
     And 查询最近 20 根 bar
     Then 应返回 20 条记录且 bar_index 从 6 到 25
+    And 每条记录应包含完整 OHLCV 字段
+
+  Scenario: 交易记录包含手续费明细
+    Given 手续费率为 0.001
+    And 引擎在 bar 0
+    When 提交买入 "AAPL" 100 股
+    And 引擎推进到 bar 1 并撮合订单
+    And 提交平仓 "AAPL"
+    And 引擎推进到 bar 2 并撮合订单
+    Then trade_log 应包含 commission 字段
+    And commission 应大于 0

@@ -154,11 +154,22 @@ class Runner:
 
     def _save_result(self, ws: Workspace, result: BacktestResult) -> None:
         result_path = ws.root / "result.json"
+        p = result.performance
         summary = {
-            "total_return": result.performance.total_return,
-            "max_drawdown": result.performance.max_drawdown,
-            "sharpe_ratio": result.performance.sharpe_ratio,
-            "total_trades": result.performance.total_trades,
+            "total_return": p.total_return,
+            "max_drawdown": p.max_drawdown,
+            "sharpe_ratio": p.sharpe_ratio,
+            "sortino_ratio": p.sortino_ratio,
+            "calmar_ratio": p.calmar_ratio,
+            "volatility": p.volatility,
+            "max_dd_duration": p.max_dd_duration,
+            "cagr": p.cagr,
+            "win_rate": p.win_rate,
+            "profit_factor": p.profit_factor,
+            "total_trades": p.total_trades,
+            "avg_trade_return": p.avg_trade_return,
+            "best_trade": p.best_trade,
+            "worst_trade": p.worst_trade,
             "workspace_path": result.workspace_path,
             "duration": result.duration,
         }

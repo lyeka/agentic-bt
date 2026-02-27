@@ -143,6 +143,65 @@ Step 3: 生成遵循度报告
 
 **右下象限最有研究价值**——分析 Agent 的违规决策和 reasoning，可以发现策略 prompt 中遗漏的有效规则。
 
+### LLM-as-Judge 实现设计
+
+#### 架构
+
+```python
+class ComplianceJudge(Protocol):
+    """遵循度评审协议 — 可注入 mock 或真实 LLM 实现"""
+    def evaluate(self, playbook: str, decision: Decision) -> Verdict: ...
+
+@dataclass
+class Verdict:
+    compliant: bool           # 是否遵循
+    rule_violated: str        # 违反的规则名（空串=无违反）
+    reasoning: str            # 判定理由
+```
+
+#### 评估流程
+
+```
+遍历 decisions (排除 hold)
+  → judge.evaluate(playbook, decision)
+  → 收集 Verdict 列表
+  → 汇总: compliance_rate, violations_by_rule, top_violations
+```
+
+#### Prompt 模板
+
+```
+你是一位严格的策略审计员。
+
+## 策略规则
+{playbook}
+
+## 本次决策
+- 时间: {decision.datetime}
+- 动作: {decision.action} {decision.symbol} {decision.quantity}
+- 当时行情: {decision.market_snapshot}
+- 使用指标: {decision.indicators_used}
+- Agent 理由: {decision.reasoning}
+
+## 任务
+判断该决策是否遵循策略规则。输出 JSON:
+{"compliant": bool, "rule_violated": "规则名或空串", "reasoning": "判定理由"}
+```
+
+#### 集成点
+
+```
+BacktestConfig.compliance_judge: ComplianceJudge | None
+  → Runner 传入 Evaluator
+  → Evaluator.calc_compliance() 内部调用 judge（如有）
+  → ComplianceReport 扩展 verdicts 字段
+```
+
+#### 测试策略
+
+BDD 测试使用 mock judge（返回固定 Verdict），保证确定性。
+真实 LLM judge 仅在集成测试中使用。
+
 ### Playbook 演化分析
 
 ```

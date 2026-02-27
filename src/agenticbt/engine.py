@@ -186,13 +186,16 @@ class Engine:
         ]
 
     def recent_bars(self, n: int = 5, symbol: str | None = None) -> list[dict[str, Any]]:
-        """最近 N 根 K 线摘要（含当前 bar），供 Context 静态注入"""
+        """最近 N 根 K 线完整 OHLCV（含当前 bar），供 Context 静态注入"""
         sym = symbol or self._symbol
         data = self._data_by_symbol.get(sym, self._data)
         start = max(0, self._bar_index - n + 1)
         return [
             {
                 "bar_index": i,
+                "open": float(data.iloc[i]["open"]),
+                "high": float(data.iloc[i]["high"]),
+                "low": float(data.iloc[i]["low"]),
                 "close": float(data.iloc[i]["close"]),
                 "volume": float(data.iloc[i]["volume"]),
             }
@@ -468,6 +471,7 @@ class Engine:
                 "buy_price": round(pos.avg_price, 4),
                 "sell_price": fill.price,
                 "pnl": round(realized, 4),
+                "commission": fill.commission,
                 "datetime": fill.datetime,
                 "bar_index": fill.bar_index,
             })

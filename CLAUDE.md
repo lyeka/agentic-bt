@@ -44,8 +44,8 @@ tests/ - BDD 测试 + E2E (25 文件: 11 features + 12 step definitions + 1 e2e)
 | agent.py | LLMAgent：ReAct loop + 三层 System Prompt 架构（框架模板+策略），支持自定义覆盖；AgentProtocol | docs/agent-protocol.md |
 | runner.py | Runner 主循环；集成 ContextManager + TraceWriter，追踪 agent_step/context/decision | docs/runner.md |
 | tracer.py | TraceWriter 本地 JSONL 追踪 + decision_to_dict 完整序列化；对齐 OTel GenAI | docs/tracer.md |
-| context.py | ContextManager：五层认知上下文组装 + XML 结构化格式化 + 持仓盈亏注入 | docs/context.md |
-| eval.py | Evaluator：绩效指标（真实 trade_log 盈亏）+ 遵循度报告 | docs/eval.md |
+| context.py | ContextManager：五层认知上下文组装 + XML 结构化格式化（完整 OHLCV 表格）+ 持仓盈亏注入 | docs/context.md |
+| eval.py | Evaluator：绩效指标（trade_log 盈亏 + sortino/calmar/volatility/cagr/max_dd_duration/avg_trade/best_worst）+ 遵循度报告 | docs/eval.md |
 | data.py | load_csv 标准化加载 + make_sample_data 模拟数据生成（regime 多行情模式） | - |
 
 ## 快速开始
@@ -164,7 +164,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-仿真度升级完成：143/143 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构 + Agent 设计重构：三层 System Prompt 架构/User Prompt XML 结构化/持仓盈亏注入/工具 Schema 优化/策略 Prompt 精简）
+仿真度升级完成：BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构 + P0-P1 优化：PerformanceMetrics +8 指标/recent_bars 完整 OHLCV/trade_log commission/LLM-as-Judge 设计文档 + Agent 设计重构：三层 System Prompt 架构/User Prompt XML 结构化/持仓盈亏注入/工具 Schema 优化/策略 Prompt 精简）
 路线图：docs/roadmap.md
 
 # currentDate

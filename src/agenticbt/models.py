@@ -262,6 +262,16 @@ class PerformanceMetrics:
     profit_factor: float
     total_trades: int
     equity_curve: list[float]
+    # 风险指标
+    sortino_ratio: float = 0.0
+    calmar_ratio: float = 0.0
+    volatility: float = 0.0
+    max_dd_duration: int = 0
+    cagr: float = 0.0
+    # 交易指标
+    avg_trade_return: float = 0.0
+    best_trade: float = 0.0
+    worst_trade: float = 0.0
 
 
 @dataclass

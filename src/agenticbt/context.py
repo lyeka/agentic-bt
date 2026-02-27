@@ -110,15 +110,19 @@ class ContextManager:
             '</account>',
         ]
 
-        # 近期 K 线走势（条件注入）
+        # 近期 K 线走势（完整 OHLCV 表格）
         if ctx.recent_bars:
-            closes = "  ".join(f"{b['close']:.2f}" for b in ctx.recent_bars)
             parts += [
                 '',
                 f'<recent_bars count="{len(ctx.recent_bars)}">',
-                closes,
-                '</recent_bars>',
+                '  bar  开盘    最高    最低    收盘    成交量',
             ]
+            for b in ctx.recent_bars:
+                parts.append(
+                    f"  {b['bar_index']:>3}  {b['open']:.2f}  {b['high']:.2f}  "
+                    f"{b['low']:.2f}  {b['close']:.2f}  {b['volume']:.0f}"
+                )
+            parts.append('</recent_bars>')
 
         # 本轮事件（条件注入）
         if ctx.events:

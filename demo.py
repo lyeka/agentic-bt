@@ -76,12 +76,19 @@ def print_report(result, elapsed: float, strategy_name: str = "") -> None:
     print(f"  初始权益      {initial:,.0f}")
     print(f"  最终权益      {final:,.0f}   ({final - initial:+,.0f})")
     print(f"  最大回撤      {p.max_drawdown * 100:.2f}%")
+    print(f"  回撤持续      {p.max_dd_duration} bar")
     print(f"  夏普比率      {p.sharpe_ratio:.3f}  (年化)")
+    print(f"  索提诺比率    {p.sortino_ratio:.3f}")
+    print(f"  年化波动率    {p.volatility * 100:.2f}%")
+    print(f"  CAGR          {p.cagr * 100:+.2f}%")
     print(f"  总交易次数    {p.total_trades}")
     if p.total_trades > 0:
         print(f"  胜率          {p.win_rate * 100:.1f}%")
         pf = p.profit_factor
         print(f"  盈亏比        {pf:.2f}" if pf != float('inf') else "  盈亏比        ∞ (无亏损)")
+        print(f"  平均单笔      {p.avg_trade_return:+,.2f}")
+        print(f"  最佳单笔      {p.best_trade:+,.2f}")
+        print(f"  最差单笔      {p.worst_trade:+,.2f}")
 
     print(f"\n【遵循度报告】")
     print(sep)
@@ -115,16 +122,20 @@ def print_report(result, elapsed: float, strategy_name: str = "") -> None:
 
 def print_comparison(results: list[tuple[str, object, float]]) -> None:
     """打印多策略对比摘要表"""
-    print(f"\n{'═' * 70}")
+    print(f"\n{'═' * 86}")
     print("  策略对比摘要")
-    print(f"{'═' * 70}")
-    print(f"  {'策略':<20s} {'收益率':>8s} {'回撤':>8s} {'夏普':>8s} {'交易':>6s} {'胜率':>6s}")
-    print(f"  {'─' * 60}")
+    print(f"{'═' * 86}")
+    print(f"  {'策略':<20s} {'收益率':>8s} {'回撤':>8s} {'夏普':>8s} {'索提诺':>8s} {'波动率':>8s} {'交易':>6s} {'胜率':>6s}")
+    print(f"  {'─' * 76}")
     for name, result, _ in results:
         p = result.performance
         wr = f"{p.win_rate*100:.0f}%" if p.total_trades > 0 else "N/A"
-        print(f"  {name:<20s} {p.total_return*100:>+7.2f}% {p.max_drawdown*100:>7.2f}% {p.sharpe_ratio:>7.3f} {p.total_trades:>6d} {wr:>6s}")
-    print(f"{'═' * 70}\n")
+        print(
+            f"  {name:<20s} {p.total_return*100:>+7.2f}% {p.max_drawdown*100:>7.2f}% "
+            f"{p.sharpe_ratio:>7.3f} {p.sortino_ratio:>7.3f} {p.volatility*100:>7.2f}% "
+            f"{p.total_trades:>6d} {wr:>6s}"
+        )
+    print(f"{'═' * 86}\n")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
