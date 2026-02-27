@@ -36,6 +36,7 @@ class Runner:
 
     def run(self, config: BacktestConfig, agent: AgentProtocol) -> BacktestResult:
         ws = Workspace()
+        print(f"工作空间: {ws.path}")
         engine = Engine(
             data=config.data,
             symbol=config.symbol,

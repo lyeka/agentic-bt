@@ -99,6 +99,26 @@ def test_macd_helper(): pass
 def test_macd_helper_insufficient(): pass
 
 
+@scenario("features/compute.feature", "latest 对 float 透传")
+def test_latest_float_passthrough(): pass
+
+
+@scenario("features/compute.feature", "latest 对 numpy float64 透传")
+def test_latest_numpy_passthrough(): pass
+
+
+@scenario("features/compute.feature", "latest 对 None 透传")
+def test_latest_none_passthrough(): pass
+
+
+@scenario("features/compute.feature", "latest 对 Series 取末值")
+def test_latest_series_last(): pass
+
+
+@scenario("features/compute.feature", "latest 对 bbands 返回值安全调用")
+def test_latest_bbands_safe(): pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 数据工厂
 # ─────────────────────────────────────────────────────────────────────────────
@@ -191,6 +211,14 @@ def when_compute_print_then_result(cptx):
 @when("调用 compute try-except 捕获异常", target_fixture="cptx")
 def when_compute_try_except(cptx):
     code = "try:\n    x = 1 / 0\nexcept ZeroDivisionError:\n    result = {'caught': True}"
+    cptx["result"] = cptx["kit"].execute("compute", {"code": code})
+    cptx["results"].append(cptx["result"])
+    return cptx
+
+
+@when("调用 compute bbands 后对返回值调用 latest", target_fixture="cptx")
+def when_compute_latest_bbands(cptx):
+    code = "upper, mid, lower = bbands(df.close, 20, 2)\nresult = latest(upper)"
     cptx["result"] = cptx["kit"].execute("compute", {"code": code})
     cptx["results"].append(cptx["result"])
     return cptx
@@ -354,6 +382,24 @@ def then_returns_none_tuple(cptx):
     assert isinstance(r, (list, tuple)), f"expected tuple/list, got {type(r)}: {r}"
     assert len(r) == 3
     assert all(v is None for v in r), f"expected all None, got {r}"
+
+
+@then(parsers.parse("compute 返回值等于 {value:g}"))
+def then_returns_value_equal(cptx, value):
+    r = cptx["result"]["result"]
+    assert isinstance(r, (int, float)), f"expected numeric, got {type(r)}: {r}"
+    assert abs(r - value) < 1e-6, f"expected {value}, got {r}"
+
+
+@then("compute 返回 None 结果")
+def then_returns_none(cptx):
+    r = cptx["result"]["result"]
+    assert r is None, f"expected None, got {type(r)}: {r}"
+
+
+@then("compute 无错误返回")
+def then_no_error(cptx):
+    assert "error" not in cptx["result"], f"unexpected error: {cptx['result'].get('error')}"
 
 
 @then("compute 返回包含 macd signal histogram 的三元组")

@@ -214,7 +214,7 @@ _SCHEMAS = [
                 "  libs: pd(pandas), np(numpy), ta(pandas_ta), math\n"
                 "  data: df(OHLCV DataFrame), account, cash, equity, positions\n"
                 "  helpers: latest(s), prev(s,n), crossover(f,s), crossunder(f,s), above(s,v), below(s,v)\n"
-                "  advanced: bbands(close,length,std)→(upper,mid,lower), macd(close)→(macd,signal,hist)\n"
+                "  advanced: bbands(close,length,std)→(float,float,float), macd(close)→(float,float,float)\n"
                 "  multi-asset: df_{symbol} (e.g. df_aapl)\n"
                 "\n"
                 "Return: expression → auto-return; multi-line → assign `result`.\n"

@@ -314,7 +314,16 @@ class Engine:
         rejection = self._risk_check(order)
         if rejection:
             self._rejected.append(RejectedOrder(order=order, reason=rejection))
-            return {"status": "rejected", "reason": rejection}
+            result: dict[str, Any] = {"status": "rejected", "reason": rejection}
+            # 仓位超限时，计算允许的最大数量，帮助 Agent 一次修正
+            if rejection == "仓位超限":
+                equity = self._equity()
+                est_price = self._current_bar(order.symbol).close
+                pos = self._positions.get(order.symbol)
+                current_value = pos.size * est_price if pos else 0
+                max_value = equity * self._risk.max_position_pct - current_value
+                result["max_allowed_qty"] = max(0, int(max_value / est_price))
+            return result
         self._pending_orders.append(order)
         return {"status": "submitted", "order_id": order.order_id}
 

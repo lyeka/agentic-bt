@@ -164,7 +164,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-仿真度升级完成：133/133 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构：黑名单 builtins/print _stdout/traceback 增强/bbands+macd helper/无状态语义明确化）
+仿真度升级完成：138/138 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构：黑名单 builtins/print _stdout/traceback 增强/bbands+macd helper/无状态语义明确化 + latest()幂等化/compute 返回类型标注/仓位超限可操作拒绝）
 路线图：docs/roadmap.md
 
 # currentDate

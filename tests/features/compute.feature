@@ -117,3 +117,25 @@ Feature: compute — 沙箱化 Python 计算工具
   Scenario: macd helper 数据不足返回 None 三元组
     When 调用 compute "result = macd(df.close, fast=999)"
     Then compute 返回 None 三元组
+
+  # ── latest() 幂等性 ──
+
+  Scenario: latest 对 float 透传
+    When 调用 compute "latest(42.0)"
+    Then compute 返回值等于 42.0
+
+  Scenario: latest 对 numpy float64 透传
+    When 调用 compute "latest(np.float64(3.14))"
+    Then compute 返回浮点数值
+
+  Scenario: latest 对 None 透传
+    When 调用 compute "latest(None)"
+    Then compute 返回 None 结果
+
+  Scenario: latest 对 Series 取末值
+    When 调用 compute "latest(pd.Series([1.0, 2.0, 3.0]))"
+    Then compute 返回值等于 3.0
+
+  Scenario: latest 对 bbands 返回值安全调用
+    When 调用 compute bbands 后对返回值调用 latest
+    Then compute 无错误返回

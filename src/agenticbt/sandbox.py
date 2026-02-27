@@ -68,7 +68,17 @@ _SAFE_GLOBALS: dict[str, Any] = {
 # Trading Coreutils — 预注入 helper
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _latest(s: pd.Series, *_: Any) -> float | None:
+def _latest(s: Any, *_: Any) -> float | None:
+    """取最新值 — 幂等：Series→末值，标量→透传，None→None"""
+    if s is None:
+        return None
+    if isinstance(s, (bool, np.bool_)):
+        return bool(s)
+    if isinstance(s, (int, float)):
+        return None if pd.isna(s) else s
+    if isinstance(s, (np.integer, np.floating)):
+        return None if pd.isna(s) else float(s)
+    # pd.Series 路径（原有行为）
     v = s.iloc[-1]
     return None if pd.isna(v) else float(v)
 
