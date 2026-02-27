@@ -116,6 +116,9 @@ def test_partial_fill_continues(): pass
 @scenario("features/engine.feature", "查询最近 N 根 K 线")
 def test_recent_bars(): pass
 
+@scenario("features/engine.feature", "交易记录包含手续费明细")
+def test_trade_log_commission(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Fixtures / State
@@ -568,3 +571,23 @@ def then_recent_bars_range(ctx, n, start, end):
     assert len(result) == n, f"expected {n} bars, got {len(result)}"
     assert result[0]["bar_index"] == start, f"first bar_index: {result[0]['bar_index']}"
     assert result[-1]["bar_index"] == end, f"last bar_index: {result[-1]['bar_index']}"
+
+
+@then("每条记录应包含完整 OHLCV 字段")
+def then_recent_bars_ohlcv(ctx):
+    for b in ctx["recent_bars_result"]:
+        for key in ("open", "high", "low", "close", "volume"):
+            assert key in b, f"missing key '{key}' in recent_bars entry"
+
+
+@then("trade_log 应包含 commission 字段")
+def then_trade_log_has_commission(ctx):
+    trade_log = _engine(ctx).trade_log()
+    assert trade_log, "没有交易记录"
+    assert "commission" in trade_log[0], "trade_log 缺少 commission 字段"
+
+
+@then("commission 应大于 0")
+def then_commission_positive(ctx):
+    trade_log = _engine(ctx).trade_log()
+    assert trade_log[0]["commission"] > 0

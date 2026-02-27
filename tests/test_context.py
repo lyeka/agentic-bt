@@ -204,13 +204,17 @@ def when_assemble(cctx):
 # Then
 # ─────────────────────────────────────────────────────────────────────────────
 
-@then(parsers.parse("上下文应包含最近 {n:d} 根 K 线的收盘价"))
+@then(parsers.parse("上下文应包含最近 {n:d} 根 K 线数据"))
 def then_has_n_recent_bars(cctx, n):
     ctx = cctx["context"]
     assert len(ctx.recent_bars) == n, f"expected {n}, got {len(ctx.recent_bars)}"
+    # 验证完整 OHLCV 字段
+    for b in ctx.recent_bars:
+        for key in ("bar_index", "open", "high", "low", "close", "volume"):
+            assert key in b, f"missing key '{key}' in recent_bars entry"
 
 
-@then(parsers.parse("上下文应包含 {n:d} 根 K 线的收盘价"))
+@then(parsers.parse("上下文应包含 {n:d} 根 K 线数据"))
 def then_has_exactly_n_bars(cctx, n):
     ctx = cctx["context"]
     assert len(ctx.recent_bars) == n, f"expected {n}, got {len(ctx.recent_bars)}"

@@ -44,8 +44,8 @@ tests/ - BDD 测试 + E2E (25 文件: 11 features + 12 step definitions + 1 e2e)
 | agent.py | LLMAgent：ReAct loop（OpenAI SDK 兼容），AgentProtocol | docs/agent-protocol.md |
 | runner.py | Runner 主循环；集成 ContextManager + TraceWriter，追踪 agent_step/context/decision | docs/runner.md |
 | tracer.py | TraceWriter 本地 JSONL 追踪 + decision_to_dict 完整序列化；对齐 OTel GenAI | docs/tracer.md |
-| context.py | ContextManager：五层认知上下文组装（recent_bars/pending_orders/recent_decisions）+ LLM 文本格式化 | docs/context.md |
-| eval.py | Evaluator：绩效指标（真实 trade_log 盈亏）+ 遵循度报告 | docs/eval.md |
+| context.py | ContextManager：五层认知上下文组装（recent_bars 完整 OHLCV 表格/pending_orders/recent_decisions）+ LLM 文本格式化 | docs/context.md |
+| eval.py | Evaluator：绩效指标（trade_log 盈亏 + sortino/calmar/volatility/cagr/max_dd_duration/avg_trade/best_worst）+ 遵循度报告 | docs/eval.md |
 | data.py | load_csv 标准化加载 + make_sample_data 模拟数据生成（regime 多行情模式） | - |
 
 ## 快速开始
@@ -164,7 +164,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-仿真度升级完成：138/138 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构：黑名单 builtins/print _stdout/traceback 增强/bbands+macd helper/无状态语义明确化 + latest()幂等化/compute 返回类型标注/仓位超限可操作拒绝）
+仿真度升级完成：144/144 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构：黑名单 builtins/print _stdout/traceback 增强/bbands+macd helper/无状态语义明确化 + latest()幂等化/compute 返回类型标注/仓位超限可操作拒绝 + P0-P1 优化：PerformanceMetrics +8 指标/recent_bars 完整 OHLCV 表格渲染/trade_log commission 分解/LLM-as-Judge 设计文档）
 路线图：docs/roadmap.md
 
 # currentDate

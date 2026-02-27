@@ -7,11 +7,11 @@ Feature: 上下文工程 — Agent 决策所需的信息组装与格式化
 
   Scenario: Agent 看到近期价格走势
     When 推进到第 25 根 bar 并组装上下文
-    Then 上下文应包含最近 20 根 K 线的收盘价
+    Then 上下文应包含最近 20 根 K 线数据
 
   Scenario: 回测初期走势不足窗口时展示所有可用的
     When 推进到第 5 根 bar 并组装上下文
-    Then 上下文应包含 6 根 K 线的收盘价
+    Then 上下文应包含 6 根 K 线数据
 
   Scenario: Agent 看到自己的挂单
     Given 提交了一个限价买入 AAPL 100 股 @ 95.0

@@ -103,11 +103,15 @@ class ContextManager:
             f"  现金={a['cash']:.0f}  净值={a['equity']:.0f}  持仓: {positions}",
         ]
 
-        # 近期 K 线走势（条件注入）
+        # 近期 K 线走势（完整 OHLCV 表格）
         if ctx.recent_bars:
-            closes = "  ".join(f"{b['close']:.2f}" for b in ctx.recent_bars)
-            lines.append(f"## 近期走势（最近 {len(ctx.recent_bars)} 根收盘价）")
-            lines.append(f"  {closes}")
+            lines.append(f"## 近期走势（最近 {len(ctx.recent_bars)} 根 K 线）")
+            lines.append("  bar  开盘    最高    最低    收盘    成交量")
+            for b in ctx.recent_bars:
+                lines.append(
+                    f"  {b['bar_index']:>3}  {b['open']:.2f}  {b['high']:.2f}  "
+                    f"{b['low']:.2f}  {b['close']:.2f}  {b['volume']:.0f}"
+                )
 
         # 挂单（条件注入：无挂单则不渲染）
         if ctx.pending_orders:
