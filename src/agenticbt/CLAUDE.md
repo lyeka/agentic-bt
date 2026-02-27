@@ -8,7 +8,7 @@
 `indicators.py`: IndicatorEngine，pandas-ta 防前瞻包装，calc/list_indicators
 `memory.py`: 文件式记忆系统，Workspace 隔离 + Memory(log/note/recall)
 `tools.py`: ToolKit，OpenAI function calling schema + 工具分发 + 调用追踪；含 market_history + compute 沙箱计算工具
-`sandbox.py`: exec_compute 沙箱执行器，eval-first 策略/黑名单 builtins（~55 标准条目）/_safe_import 白名单模块/Trading Coreutils/print→_stdout 捕获/SIGALRM 超时/traceback 增强/_serialize 自动降维
+`sandbox.py`: exec_compute 沙箱执行器，eval-first 策略/黑名单 builtins（~55 标准条目）/_safe_import 白名单模块/Trading Coreutils（含 bbands/macd 高级 helper）/print→_stdout 捕获/SIGALRM 超时/traceback 增强/_serialize 自动降维（含 tuple 递归序列化）
 `context.py`: ContextManager，五层认知上下文组装与格式化；assemble() → Context，_format_text() → formatted_text
 `agent.py`: LLMAgent，ReAct loop（OpenAI SDK 兼容），AgentProtocol 接口；支持 TraceWriter 注入追踪 llm_call/tool_call
 `runner.py`: Runner 回测主循环；集成 ContextManager + TraceWriter，追踪 agent_step/context/decision；decision_to_dict 完整持久化

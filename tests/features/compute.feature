@@ -99,3 +99,21 @@ Feature: compute — 沙箱化 Python 计算工具
   Scenario: 错误时也返回 _meta
     When 调用 compute "result = 1 / 0"
     Then compute 返回包含 _meta 的错误结果
+
+  # ── 高级 helper：bbands / macd ──
+
+  Scenario: bbands helper 返回三元组
+    When 调用 compute "result = bbands(df.close, 20, 2)"
+    Then compute 返回包含 upper middle lower 的三元组
+
+  Scenario: bbands helper 数据不足返回 None 三元组
+    When 调用 compute "result = bbands(df.close, 999, 2)"
+    Then compute 返回 None 三元组
+
+  Scenario: macd helper 返回三元组
+    When 调用 compute "result = macd(df.close)"
+    Then compute 返回包含 macd signal histogram 的三元组
+
+  Scenario: macd helper 数据不足返回 None 三元组
+    When 调用 compute "result = macd(df.close, fast=999)"
+    Then compute 返回 None 三元组

@@ -500,6 +500,8 @@ _PROMPT_QUANT_COMPUTE = (
     "你是一位量化研究员，拥有 Python 计算终端（compute 工具）。\n"
     "compute 中 df 已包含截止当前 bar 的完整 OHLCV 数据。\n"
     "pd/np/ta(pandas_ta)/math 已预注入，可直接使用。\n\n"
+    "重要：每次 compute 调用是独立沙箱，变量不跨调用保留。\n"
+    "把所有计算放在一次调用中，用 result = {...} 返回。\n\n"
     "决策流程：\n"
     "1. 用 compute 计算关键指标（RSI、均线、ATR 等）\n"
     "2. 根据指标值决策\n"
@@ -508,10 +510,12 @@ _PROMPT_QUANT_COMPUTE = (
     "  rsi = latest(ta.rsi(df.close, 14))\n"
     "  sma20 = latest(df.close.rolling(20).mean())\n"
     "  atr = latest(ta.atr(df.high, df.low, df.close, 14))\n"
+    "  upper, mid, lower = bbands(df.close, 20, 2)\n"
+    "  macd_val, signal, hist = macd(df.close)\n"
     "  cross = crossover(df.close.rolling(10).mean(), df.close.rolling(30).mean())\n"
     "  qty = max(1, int(equity * 0.02 / atr)) if atr else 0\n"
-    "  result = {'rsi': rsi, 'sma20': sma20, 'cross': cross, 'qty': qty}\n\n"
-    "注意：ta.macd()/ta.bbands() 等在数据不足时返回 None，需判空。\n"
+    "  result = {'rsi': rsi, 'sma20': sma20, 'bb_upper': upper, 'cross': cross, 'qty': qty}\n\n"
+    "注意：bbands()/macd() 数据不足时返回 (None, None, None)，需判空。\n"
     "简洁高效：2-4 个指标足以做出好决策。"
 )
 

@@ -207,12 +207,14 @@ _SCHEMAS = [
         "function": {
             "name": "compute",
             "description": (
-                "Execute Python code. Standard Python env with data science libs pre-loaded.\n"
+                "Execute Python code in isolated sandbox. Each call is a FRESH namespace — "
+                "variables do NOT persist between calls. Compute everything in ONE call.\n"
                 "\n"
                 "Pre-loaded:\n"
                 "  libs: pd(pandas), np(numpy), ta(pandas_ta), math\n"
                 "  data: df(OHLCV DataFrame), account, cash, equity, positions\n"
                 "  helpers: latest(s), prev(s,n), crossover(f,s), crossunder(f,s), above(s,v), below(s,v)\n"
+                "  advanced: bbands(close,length,std)→(upper,mid,lower), macd(close)→(macd,signal,hist)\n"
                 "  multi-asset: df_{symbol} (e.g. df_aapl)\n"
                 "\n"
                 "Return: expression → auto-return; multi-line → assign `result`.\n"
@@ -228,11 +230,12 @@ _SCHEMAS = [
                 "         \"\\nresult = {'rsi': rsi, 'atr': atr, 'qty': qty}\"\n"
                 "   → {\"result\": {\"rsi\": 55.3, \"atr\": 1.8, \"qty\": 11}, \"_meta\": {...}}\n"
                 "\n"
-                "3) ta returns None when data insufficient — always check:\n"
-                "   code: \"macd_df = ta.macd(df.close)\\nif macd_df is not None:\\n\"\n"
-                "         \"    result = {'macd': latest(macd_df['MACD_12_26_9'])}\\n\"\n"
-                "         \"else:\\n    result = {'macd': None, 'note': 'insufficient data'}\"\n"
-                "   → {\"result\": {\"macd\": 0.45}, \"_meta\": {...}}"
+                "3) code: \"upper, mid, lower = bbands(df.close, 20, 2)\\n\"\n"
+                "         \"macd_val, signal, hist = macd(df.close)\\n\"\n"
+                "         \"result = {'bb_upper': upper, 'macd': macd_val}\"\n"
+                "   → {\"result\": {\"bb_upper\": 155.2, \"macd\": 0.45}, \"_meta\": {...}}\n"
+                "\n"
+                "Note: bbands/macd helpers return None tuple when data insufficient."
             ),
             "parameters": {
                 "type": "object",

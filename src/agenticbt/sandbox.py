@@ -1,6 +1,6 @@
 """
 [INPUT]: pandas, numpy, pandas_ta, math, signal, builtins, io, traceback
-[OUTPUT]: exec_compute — 沙箱化 Python 执行器；HELPERS — Trading Coreutils
+[OUTPUT]: exec_compute — 沙箱化 Python 执行器；HELPERS — Trading Coreutils（含 bbands/macd 高级 helper）
 [POS]: compute 工具的执行层，被 tools.py 的 _compute 调用；与 Engine 无耦合
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -94,6 +94,27 @@ def _below(s: pd.Series, threshold: float) -> bool:
     return bool(s.iloc[-1] < threshold)
 
 
+def _bbands(close: pd.Series, length: int = 20, std: float = 2.0) -> tuple:
+    """布林带 helper：返回 (upper, middle, lower) 最新值，数据不足返回 (None, None, None)"""
+    bb = ta.bbands(close, length=length, std=std)
+    if bb is None or bb.empty:
+        return (None, None, None)
+    cols = list(bb.columns)  # 版本无关：BBL, BBM, BBU 顺序可能变化
+    # pandas_ta 列名含 BBL/BBM/BBU 前缀，按前缀匹配
+    get = lambda prefix: _latest(bb[[c for c in cols if c.startswith(prefix)][0]])
+    return (get("BBU"), get("BBM"), get("BBL"))
+
+
+def _macd(close: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> tuple:
+    """MACD helper：返回 (macd, signal, histogram) 最新值，数据不足返回 (None, None, None)"""
+    m = ta.macd(close, fast=fast, slow=slow, signal=signal)
+    if m is None or m.empty:
+        return (None, None, None)
+    cols = list(m.columns)  # MACD_, MACDs_, MACDh_ 前缀
+    get = lambda prefix: _latest(m[[c for c in cols if c.startswith(prefix)][0]])
+    return (get("MACD_"), get("MACDs_"), get("MACDh_"))
+
+
 HELPERS: dict[str, Any] = {
     "latest": _latest,
     "prev": _prev,
@@ -101,6 +122,8 @@ HELPERS: dict[str, Any] = {
     "crossunder": _crossunder,
     "above": _above,
     "below": _below,
+    "bbands": _bbands,
+    "macd": _macd,
 }
 
 
@@ -184,9 +207,11 @@ def _exec_code(code: str, local_ns: dict[str, Any]) -> dict[str, Any]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _serialize(value: Any) -> Any:
-    """自动降维：Series→最新值，DataFrame→报错，numpy→float。"""
+    """自动降维：Series→最新值，DataFrame→报错，numpy→float，tuple/list→递归序列化。"""
     if value is None:
         return None
+    if isinstance(value, tuple):
+        return [_serialize(v) for v in value]
     if isinstance(value, pd.Series):
         v = value.iloc[-1]
         return None if pd.isna(v) else float(v)

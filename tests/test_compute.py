@@ -83,6 +83,22 @@ def test_try_except(): pass
 def test_error_with_meta(): pass
 
 
+@scenario("features/compute.feature", "bbands helper 返回三元组")
+def test_bbands_helper(): pass
+
+
+@scenario("features/compute.feature", "bbands helper 数据不足返回 None 三元组")
+def test_bbands_helper_insufficient(): pass
+
+
+@scenario("features/compute.feature", "macd helper 返回三元组")
+def test_macd_helper(): pass
+
+
+@scenario("features/compute.feature", "macd helper 数据不足返回 None 三元组")
+def test_macd_helper_insufficient(): pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 数据工厂
 # ─────────────────────────────────────────────────────────────────────────────
@@ -319,3 +335,29 @@ def then_returns_caught_dict(cptx):
 def then_returns_error_with_meta(cptx):
     assert "error" in cptx["result"], f"expected error, got {cptx['result']}"
     assert "_meta" in cptx["result"], f"expected _meta in error result, got {cptx['result']}"
+
+
+@then("compute 返回包含 upper middle lower 的三元组")
+def then_returns_bbands_tuple(cptx):
+    r = cptx["result"]["result"]
+    assert isinstance(r, (list, tuple)), f"expected tuple/list, got {type(r)}: {r}"
+    assert len(r) == 3
+    upper, middle, lower = r
+    assert isinstance(upper, float)
+    assert isinstance(middle, float)
+    assert isinstance(lower, float)
+
+
+@then("compute 返回 None 三元组")
+def then_returns_none_tuple(cptx):
+    r = cptx["result"]["result"]
+    assert isinstance(r, (list, tuple)), f"expected tuple/list, got {type(r)}: {r}"
+    assert len(r) == 3
+    assert all(v is None for v in r), f"expected all None, got {r}"
+
+
+@then("compute 返回包含 macd signal histogram 的三元组")
+def then_returns_macd_tuple(cptx):
+    r = cptx["result"]["result"]
+    assert isinstance(r, (list, tuple)), f"expected tuple/list, got {type(r)}: {r}"
+    assert len(r) == 3
