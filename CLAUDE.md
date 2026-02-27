@@ -14,6 +14,7 @@ Agent 说意图，Framework 说真相。LLM Agent 像人类交易员一样思考
 docs/          - 设计文档 (9 篇，指导全部开发)
 src/
   agenticbt/   - 12 个业务文件
+scripts/       - 分析脚本 (trace 分析报告)
 examples/      - 策略注册表 + Mock Agent + LLM Prompt（8 策略）
 tests/
   features/    - 10 个 Gherkin feature 文件（可执行规格说明）
@@ -24,6 +25,7 @@ pyproject.toml - Python 包配置（venv: .venv/）
 <directory>
 docs/ - 完整设计文档集 (11 文件: architecture, engine, tools, compute, memory, context, eval, agent-protocol, runner, tracer, roadmap)
 src/agenticbt/ - 核心业务代码 (13 文件: __init__, models, engine, indicators, memory, tools, sandbox, context, agent, runner, eval, data, tracer)
+scripts/ - 分析脚本 (1 文件: analyze_trace)
 examples/ - 策略模块 (2 文件: __init__, strategies)
 tests/ - BDD 测试 + E2E (25 文件: 11 features + 12 step definitions + 1 e2e)
 </directory>
