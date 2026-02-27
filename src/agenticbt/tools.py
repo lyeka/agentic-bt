@@ -36,7 +36,11 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "market_observe",
-            "description": "获取当前 bar 的市场行情",
+            "description": (
+                "查询指定 symbol 的当前行情快照。"
+                "仅多资产场景需要，单资产行情已在上下文中提供。"
+                "返回 {datetime, symbol, open, high, low, close, volume}。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -53,7 +57,12 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "indicator_calc",
-            "description": "计算技术指标（RSI/SMA/EMA/ATR 用 period 参数；MACD 用 fast/slow/signal 参数，忽略 period）",
+            "description": (
+                "计算单个技术指标的最新值。"
+                "支持: RSI, SMA, EMA, ATR (用 period 参数), MACD, BBANDS (用默认参数)。"
+                "返回 {value: float} 或 {upper/middle/lower: float}。"
+                "如需一次计算多个指标，推荐用 compute 工具更高效。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -68,7 +77,11 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "account_status",
-            "description": "查询当前账户持仓和资金状态",
+            "description": (
+                "查询最新账户状态。"
+                "仅需确认最新持仓变化时使用，基础账户信息已在上下文中提供。"
+                "返回 {cash, equity, positions}。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -80,7 +93,12 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "trade_execute",
-            "description": "执行交易操作（buy/sell/close）。观望时无需调用此工具，直接输出分析即可。",
+            "description": (
+                "执行交易。观望时不要调用此工具。"
+                "action: buy/sell/close。close 时无需 quantity。"
+                "支持 bracket: 同时传 stop_loss + take_profit 自动创建 OCO 保护单。"
+                "返回 {status, order_id} 或 {status: rejected, reason}。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -122,7 +140,7 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "memory_log",
-            "description": "在当日日志中追加一条记录",
+            "description": "在当日日志中追加一条记录。交易后用此记录决策理由。返回 {status: ok}。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -136,7 +154,7 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "memory_note",
-            "description": "创建或更新主题笔记",
+            "description": "创建或更新主题笔记（如持仓理由、策略参数）。返回 {status: ok}。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -151,7 +169,7 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "memory_recall",
-            "description": "按关键词检索记忆",
+            "description": "按关键词检索历史记忆。返回 {results: [str]}。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -165,7 +183,7 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "order_cancel",
-            "description": "取消指定的挂单",
+            "description": "取消指定的挂单。先用 order_query 获取有效 order_id。返回 {status: cancelled}。",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -179,7 +197,7 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "order_query",
-            "description": "查询当前所有待执行的挂单列表",
+            "description": "查询当前所有待执行的挂单。返回 {pending_orders: [{order_id, symbol, side, quantity, ...}]}。",
             "parameters": {
                 "type": "object",
                 "properties": {},
@@ -191,7 +209,11 @@ _SCHEMAS = [
         "type": "function",
         "function": {
             "name": "market_history",
-            "description": "获取最近 N 根 K 线的完整历史数据（OHLCV），用于分析趋势",
+            "description": (
+                "获取最近 N 根 K 线的完整 OHLCV 历史。"
+                "仅当需要比 compute 中 df 更细粒度的分析时使用。"
+                "返回 {history: [{date, open, high, low, close, volume}]}。"
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -207,35 +229,11 @@ _SCHEMAS = [
         "function": {
             "name": "compute",
             "description": (
-                "Execute Python code in isolated sandbox. Each call is a FRESH namespace — "
-                "variables do NOT persist between calls. Compute everything in ONE call.\n"
-                "\n"
-                "Pre-loaded:\n"
-                "  libs: pd(pandas), np(numpy), ta(pandas_ta), math\n"
-                "  data: df(OHLCV DataFrame), account, cash, equity, positions\n"
-                "  helpers: latest(s), prev(s,n), crossover(f,s), crossunder(f,s), above(s,v), below(s,v)\n"
-                "  advanced: bbands(close,length,std)→(float,float,float), macd(close)→(float,float,float)\n"
-                "  multi-asset: df_{symbol} (e.g. df_aapl)\n"
-                "\n"
-                "Return: expression → auto-return; multi-line → assign `result`.\n"
-                "print() → `_stdout` field. import: pandas/numpy/pandas_ta/math only.\n"
-                "\n"
-                "Examples:\n"
-                "\n"
-                "1) code: \"latest(ta.rsi(df.close, 14))\"\n"
-                "   → {\"result\": 55.3, \"_meta\": {\"df_rows\": 31, ...}}\n"
-                "\n"
-                "2) code: \"rsi = latest(ta.rsi(df.close, 14))\\natr = latest(ta.atr(df.high, df.low, df.close, 14))\"\n"
-                "         \"\\nqty = max(1, int(equity * 0.02 / atr)) if atr else 0\"\n"
-                "         \"\\nresult = {'rsi': rsi, 'atr': atr, 'qty': qty}\"\n"
-                "   → {\"result\": {\"rsi\": 55.3, \"atr\": 1.8, \"qty\": 11}, \"_meta\": {...}}\n"
-                "\n"
-                "3) code: \"upper, mid, lower = bbands(df.close, 20, 2)\\n\"\n"
-                "         \"macd_val, signal, hist = macd(df.close)\\n\"\n"
-                "         \"result = {'bb_upper': upper, 'macd': macd_val}\"\n"
-                "   → {\"result\": {\"bb_upper\": 155.2, \"macd\": 0.45}, \"_meta\": {...}}\n"
-                "\n"
-                "Note: bbands/macd helpers return None tuple when data insufficient."
+                "Python 计算沙箱。每次调用是独立命名空间。"
+                "预加载: df(OHLCV), pd, np, ta, math, account, cash, equity, positions。"
+                "Helpers: latest(s), prev(s,n), crossover(f,s), bbands(close,l,std), macd(close)。"
+                "单表达式自动返回；多行代码赋值给 result。"
+                "返回 {result: ..., _meta: {df_rows, columns}} 或 {error: str}。"
             ),
             "parameters": {
                 "type": "object",

@@ -1,7 +1,7 @@
 """
 [INPUT]: agenticbt.engine, agenticbt.memory, agenticbt.models (ContextConfig, Context, EngineEvent)
-[OUTPUT]: ContextManager — 组装并格式化 Agent 决策所需的完整上下文
-[POS]: Runner 和 Agent 的桥接层；assemble() 生产 Context 对象，格式化文本由此产出
+[OUTPUT]: ContextManager — 组装并格式化 Agent 决策所需的完整上下文（XML 结构化输出 + 持仓盈亏注入）
+[POS]: Runner 和 Agent 的桥接层；assemble() 生产 Context 对象，_format_text() 输出 XML 结构化文本
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -73,7 +73,11 @@ class ContextManager:
                 "cash": acc.cash,
                 "equity": acc.equity,
                 "positions": {
-                    sym: {"size": p.size, "avg_price": p.avg_price}
+                    sym: {
+                        "size": p.size,
+                        "avg_price": p.avg_price,
+                        "unrealized_pnl": (engine.current_price(sym) - p.avg_price) * p.size,
+                    }
                     for sym, p in acc.positions.items()
                 },
             },
@@ -88,65 +92,84 @@ class ContextManager:
     # ── 格式化 ────────────────────────────────────────────────────────────────
 
     def _format_text(self, ctx: Context) -> str:
+        """XML 结构化输出 — 数据在前，指令在后"""
         m = ctx.market
         a = ctx.account
         positions = ", ".join(
-            f"{sym} {p['size']}股@{p['avg_price']:.2f}"
+            f"{sym} {p['size']}股@{p['avg_price']:.2f} | 未实现{p['unrealized_pnl']:+.0f}"
             for sym, p in a["positions"].items()
         ) or "空仓"
 
-        lines = [
-            f"## 当前行情  [{ctx.datetime}  bar={ctx.bar_index}]",
-            f"  {m['symbol']}  开={m['open']}  高={m['high']}  低={m['low']}"
-            f"  收={m['close']}  量={m['volume']:.0f}",
-            f"## 账户",
-            f"  现金={a['cash']:.0f}  净值={a['equity']:.0f}  持仓: {positions}",
+        parts = [
+            f'<market datetime="{ctx.datetime}" bar="{ctx.bar_index}" symbol="{m["symbol"]}">',
+            f'开={m["open"]}  高={m["high"]}  低={m["low"]}  收={m["close"]}  量={m["volume"]:.0f}',
+            '</market>',
+            '',
+            f'<account cash="{a["cash"]:.0f}" equity="{a["equity"]:.0f}">',
+            f'{positions}',
+            '</account>',
         ]
 
         # 近期 K 线走势（条件注入）
         if ctx.recent_bars:
             closes = "  ".join(f"{b['close']:.2f}" for b in ctx.recent_bars)
-            lines.append(f"## 近期走势（最近 {len(ctx.recent_bars)} 根收盘价）")
-            lines.append(f"  {closes}")
+            parts += [
+                '',
+                f'<recent_bars count="{len(ctx.recent_bars)}">',
+                closes,
+                '</recent_bars>',
+            ]
+
+        # 本轮事件（条件注入）
+        if ctx.events:
+            parts.append('')
+            parts.append('<events>')
+            for e in ctx.events:
+                parts.append(self._format_event(e))
+            parts.append('</events>')
 
         # 挂单（条件注入：无挂单则不渲染）
         if ctx.pending_orders:
-            lines.append("## 挂单")
+            parts.append('')
+            parts.append('<pending_orders>')
             for o in ctx.pending_orders:
                 price_info = ""
                 if o.get("limit_price") is not None:
                     price_info = f" limit={o['limit_price']}"
                 elif o.get("stop_price") is not None:
                     price_info = f" stop={o['stop_price']}"
-                lines.append(
-                    f"  [{o['order_id']}] {o['order_type']} {o['side']} "
+                parts.append(
+                    f"[{o['order_id']}] {o['order_type']} {o['side']} "
                     f"{o['symbol']} {o['quantity']}股{price_info}"
                 )
-
-        # 本轮事件（条件注入）
-        if ctx.events:
-            lines.append("## 本轮事件")
-            for e in ctx.events:
-                lines.append(f"  {self._format_event(e)}")
+            parts.append('</pending_orders>')
 
         # 持仓备注（按 symbol 逐行）
         if ctx.position_notes:
-            lines.append("## 持仓备注")
+            parts.append('')
+            parts.append('<position_notes>')
             for sym, note in ctx.position_notes.items():
-                lines.append(f"  {sym}: {note}")
+                parts.append(f"{sym}: {note}")
+            parts.append('</position_notes>')
 
         # 近期决策（条件注入：无历史则不渲染）
         if ctx.recent_decisions:
-            lines.append("## 近期决策")
+            parts.append('')
+            parts.append('<recent_decisions>')
             for d in ctx.recent_decisions:
-                lines.append(f"  [{d['bar_index']}] {d['action']}: {d['reasoning']}")
+                parts.append(f"[{d['bar_index']}] {d['action']}: {d['reasoning']}")
+            parts.append('</recent_decisions>')
 
-        lines.append(
-            f"\n以上行情与账户数据已是最新快照，无需重复获取。\n"
-            f"compute 工具中 df 已包含 {ctx.bar_index + 1} 行完整 OHLCV 数据，可直接用 df.close 等访问分析。\n"
-            f"请使用可用工具分析后给出交易决策。"
-        )
-        return "\n".join(lines)
+        # 任务指令（始终在最后）
+        parts += [
+            '',
+            '<task>',
+            '分析当前市场状态，根据你的策略做出交易决策。',
+            f'compute 工具中 df 已包含 {ctx.bar_index + 1} 行完整 OHLCV 数据。',
+            '</task>',
+        ]
+
+        return "\n".join(parts)
 
     def _format_event(self, e: dict[str, Any]) -> str:
         """按事件类型格式化，防止 fill/expired/cancelled 字段缺失报错"""

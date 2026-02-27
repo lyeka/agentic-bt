@@ -43,6 +43,12 @@ def test_decision_audit(): pass
 @scenario("features/agent.feature", "LLM API 异常时重试后返回 hold")
 def test_llm_retry_on_error(): pass
 
+@scenario("features/agent.feature", "System Prompt 包含框架模板和策略")
+def test_system_prompt_framework(): pass
+
+@scenario("features/agent.feature", "自定义 System Prompt 覆盖框架模板")
+def test_custom_system_prompt(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -135,6 +141,18 @@ def given_failing_llm():
     return {"agent": agent, "toolkit": toolkit, "make_response": always_fail}
 
 
+@given("一个使用自定义 system prompt 的 Agent", target_fixture="actx")
+def given_custom_system_prompt():
+    custom_prompt = "你是一个完全自定义的交易员。按你的判断交易。"
+    responses = [
+        _mock_response("stop", content="观望"),
+    ]
+    toolkit = _make_toolkit()
+    agent = LLMAgent(max_rounds=5, system_prompt=custom_prompt)
+    return {"agent": agent, "toolkit": toolkit, "responses": responses,
+            "custom_prompt": custom_prompt}
+
+
 @given(parsers.parse("max_rounds 设为 {n:d}"), target_fixture="actx")
 def given_max_rounds(actx, n):
     actx["agent"].max_rounds = n
@@ -189,6 +207,7 @@ def when_decide(actx):
          patch("agenticbt.agent.time.sleep"):
         actx["decision"] = agent.decide(context, toolkit)
 
+    actx["mock_create"] = mock_create
     return actx
 
 
@@ -247,3 +266,19 @@ def then_has_latency(actx):
 def then_no_exception(actx):
     """B3: LLM 全部失败后，decide() 仍正常返回 Decision 对象"""
     assert actx["decision"] is not None
+
+
+@then(parsers.parse('LLM 收到的 system prompt 应包含 "{text}"'))
+def then_system_prompt_contains(actx, text):
+    mock_create = actx["mock_create"]
+    messages = mock_create.call_args_list[0].kwargs["messages"]
+    system_msg = messages[0]["content"]
+    assert text in system_msg, f"'{text}' not found in system prompt"
+
+
+@then("LLM 收到的 system prompt 应为自定义内容")
+def then_custom_system_prompt(actx):
+    mock_create = actx["mock_create"]
+    messages = mock_create.call_args_list[0].kwargs["messages"]
+    system_msg = messages[0]["content"]
+    assert system_msg == actx["custom_prompt"]

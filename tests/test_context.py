@@ -57,6 +57,12 @@ def test_position_notes(): pass
 @scenario("features/context.feature", "Playbook 注入系统提示词")
 def test_playbook(): pass
 
+@scenario("features/context.feature", "格式化输出使用 XML 结构")
+def test_xml_structure(): pass
+
+@scenario("features/context.feature", "持仓盈亏直接注入上下文")
+def test_position_pnl(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -174,6 +180,17 @@ def given_playbook(cctx, text):
     return cctx
 
 
+@given(parsers.parse("持有 AAPL {qty:d} 股均价 {avg:f} 当前价 {cur:f}"), target_fixture="cctx")
+def given_position_with_price(cctx, qty, avg, cur):
+    eng = cctx["engine"]
+    if eng._bar_index < 0:
+        eng.advance()
+    eng._positions["AAPL"] = Position(symbol="AAPL", size=qty, avg_price=avg)
+    # 覆盖当前 bar 的 close 为指定价格
+    eng._data.iloc[eng._bar_index, eng._data.columns.get_loc("close")] = cur
+    return cctx
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # When
 # ─────────────────────────────────────────────────────────────────────────────
@@ -216,16 +233,11 @@ def then_has_exactly_n_bars(cctx, n):
     assert len(ctx.recent_bars) == n, f"expected {n}, got {len(ctx.recent_bars)}"
 
 
-@then("上下文文本应包含挂单信息")
-def then_text_has_pending(cctx):
-    assert "挂单" in cctx["context"].formatted_text
-
-
-@then(parsers.parse('挂单信息应包含 "{a}" 和 "{b}"'))
-def then_pending_contains(cctx, a, b):
-    text = cctx["context"].formatted_text
-    assert a in text, f"'{a}' not in formatted_text"
-    assert b in text, f"'{b}' not in formatted_text"
+@then(parsers.parse('上下文文本应包含 "{text}"'))
+def then_text_contains(cctx, text):
+    assert text in cctx["context"].formatted_text, (
+        f"'{text}' not found in:\n{cctx['context'].formatted_text}"
+    )
 
 
 @then(parsers.parse('上下文文本不应包含 "{text}"'))
@@ -237,13 +249,6 @@ def then_text_not_contains(cctx, text):
 def then_has_n_recent_decisions(cctx, n):
     ctx = cctx["context"]
     assert len(ctx.recent_decisions) == n, f"expected {n}, got {len(ctx.recent_decisions)}"
-
-
-@then(parsers.parse('上下文文本应包含 "{text}"'))
-def then_text_contains(cctx, text):
-    assert text in cctx["context"].formatted_text, (
-        f"'{text}' not found in:\n{cctx['context'].formatted_text}"
-    )
 
 
 @then(parsers.parse('context.playbook 应为 "{text}"'))

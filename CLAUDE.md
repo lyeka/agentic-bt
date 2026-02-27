@@ -39,12 +39,12 @@ tests/ - BDD 测试 + E2E (25 文件: 11 features + 12 step definitions + 1 e2e)
 | engine.py | 确定性市场模拟：多资产数据/market+limit+stop+bracket 订单/多空/风控4检查/百分比滑点/部分成交 | docs/engine.md |
 | indicators.py | pandas-ta 防前瞻包装，calc(name, df, bar_index) | - |
 | memory.py | 文件式记忆：Workspace 隔离 + log/note/recall | docs/memory.md |
-| tools.py | ToolKit：OpenAI function calling schema + 分发 + 调用追踪；market_observe 支持 symbol；含 compute 沙箱计算 | docs/tools.md, docs/compute.md |
+| tools.py | ToolKit：OpenAI function calling schema（含用途+返回值说明） + 分发 + 调用追踪；含 compute 沙箱计算 | docs/tools.md, docs/compute.md |
 | sandbox.py | exec_compute 沙箱执行器：eval-first/黑名单 builtins/print→_stdout/Trading Coreutils（含 bbands/macd helper）/SIGALRM 超时/traceback 增强/自动降维序列化 | docs/compute.md |
-| agent.py | LLMAgent：ReAct loop（OpenAI SDK 兼容），AgentProtocol | docs/agent-protocol.md |
+| agent.py | LLMAgent：ReAct loop + 三层 System Prompt 架构（框架模板+策略），支持自定义覆盖；AgentProtocol | docs/agent-protocol.md |
 | runner.py | Runner 主循环；集成 ContextManager + TraceWriter，追踪 agent_step/context/decision | docs/runner.md |
 | tracer.py | TraceWriter 本地 JSONL 追踪 + decision_to_dict 完整序列化；对齐 OTel GenAI | docs/tracer.md |
-| context.py | ContextManager：五层认知上下文组装（recent_bars/pending_orders/recent_decisions）+ LLM 文本格式化 | docs/context.md |
+| context.py | ContextManager：五层认知上下文组装 + XML 结构化格式化 + 持仓盈亏注入 | docs/context.md |
 | eval.py | Evaluator：绩效指标（真实 trade_log 盈亏）+ 遵循度报告 | docs/eval.md |
 | data.py | load_csv 标准化加载 + make_sample_data 模拟数据生成（regime 多行情模式） | - |
 
@@ -164,7 +164,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-仿真度升级完成：138/138 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构：黑名单 builtins/print _stdout/traceback 增强/bbands+macd helper/无状态语义明确化 + latest()幂等化/compute 返回类型标注/仓位超限可操作拒绝）
+仿真度升级完成：143/143 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构 + Agent 设计重构：三层 System Prompt 架构/User Prompt XML 结构化/持仓盈亏注入/工具 Schema 优化/策略 Prompt 精简）
 路线图：docs/roadmap.md
 
 # currentDate

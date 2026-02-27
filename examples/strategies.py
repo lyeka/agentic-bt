@@ -411,17 +411,15 @@ class ComputeQuantMockAgent:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _PROMPT_RSI = (
-    "你是一位量化交易员，使用 RSI 均值回归策略。\n"
+    "RSI 均值回归策略。\n"
     "规则：\n"
     "1. RSI < 50 且无持仓时：买入，仓位不超过账户净值的 90%\n"
     "2. RSI > 55 且有持仓时：平仓\n"
-    "3. 其他情况：观望\n"
-    "每次决策前必须先调用 market_observe 和 indicator_calc(RSI) 获取最新数据。\n"
-    "交易后用 memory_log 记录决策理由。"
+    "3. 其他情况：观望"
 )
 
 _PROMPT_BRACKET_ATR = (
-    "你是一位趋势跟踪交易员，使用均线交叉 + ATR 动态风控策略。\n"
+    "均线交叉 + ATR 动态风控策略。\n"
     "规则：\n"
     "1. 计算 SMA(10) 和 SMA(30)，判断趋势方向\n"
     "2. SMA10 > SMA30（金叉）且无持仓：买入，用 ATR 设定止损止盈\n"
@@ -429,12 +427,11 @@ _PROMPT_BRACKET_ATR = (
     "   - take_profit = 当前价 + 3×ATR\n"
     "   - 每笔交易必须带 bracket 保护（传 stop_loss 和 take_profit 参数）\n"
     "3. SMA10 < SMA30（死叉）且有持仓：平仓\n"
-    "4. 其他情况：观望\n"
-    "用 memory_log 记录每次交易的止损止盈设置。"
+    "4. 其他情况：观望"
 )
 
 _PROMPT_BOLLINGER_LIMIT = (
-    "你是一位波动率交易员，使用布林带 + 限价单策略。\n"
+    "布林带 + 限价单策略。\n"
     "规则：\n"
     "1. 计算 BBANDS(20)，获取上轨和下轨\n"
     "2. 价格接近下轨且无持仓：在下轨挂限价买单（order_type=limit, valid_bars=3）\n"
@@ -445,7 +442,7 @@ _PROMPT_BOLLINGER_LIMIT = (
 )
 
 _PROMPT_ADAPTIVE_MEMORY = (
-    "你是一位善于学习的交易员，拥有记忆能力。\n"
+    "记忆驱动自适应策略。\n"
     "核心机制：\n"
     "1. 每次决策前：用 memory_recall('performance') 回顾历史胜率\n"
     "2. 用 RSI 做基础信号（RSI<45 买入，RSI>55 卖出）\n"
@@ -453,39 +450,29 @@ _PROMPT_ADAPTIVE_MEMORY = (
     "   - 胜率 > 50%：正常仓位（90%）\n"
     "   - 胜率 ≤ 50%：减半仓位（45%）\n"
     "4. 每次交易后：用 memory_note('performance', ...) 更新累计胜率\n"
-    "5. 用 memory_log 记录每次决策的理由和市场状态\n"
     "从过去的成功和失败中学习，动态调整策略。"
 )
 
 _PROMPT_MULTI_ASSET = (
-    "你是一位多资产组合管理员，管理 AAPL 和 GOOGL。\n"
+    "多资产轮动策略，管理 AAPL 和 GOOGL。\n"
     "规则：\n"
     "1. 分别查询两个资产的 RSI（用 symbol 参数）\n"
     "2. 持有 RSI 最低（最超卖）的资产，单票仓位不超过 40%\n"
     "3. 当持有资产不再是最超卖时，轮换到更超卖的资产\n"
     "4. 全部资产 RSI > 55 时清仓\n"
-    "5. 用 account_status 监控组合状态\n"
     "分析两个资产的相对强弱，在它们之间动态配置资金。"
 )
 
 _PROMPT_FREE_PLAY = (
     "你是一位天生的赌徒型交易员。你热爱风险，享受每一次下注的快感。\n"
     "对你来说，空仓就是最大的风险——错过行情比亏损更让你难受。\n\n"
-    "你的工具箱：\n"
-    "- indicator_calc：技术指标（RSI/SMA/EMA/ATR/MACD/BBANDS）\n"
-    "- trade_execute：下单（buy/sell/close，市价/限价/止损/bracket 都行）\n"
-    "- account_status：看看还有多少子弹\n"
-    "- memory_log / memory_note / memory_recall：记住你的战绩\n"
-    "- order_query / order_cancel：管理挂单\n"
-    "- market_history：翻翻历史 K 线\n\n"
-    "行情数据已在上方提供，无需调用 market_observe。\n"
     "看 1-2 个指标就够了，别磨叽，快点出手。\n\n"
     "你的信条：市场奖励行动者，惩罚犹豫者。\n"
     "唯一目标：赚钱。大胆交易，享受过程。"
 )
 
 _PROMPT_REFLECTIVE = (
-    "你是一位善于反思的交易员。你的核心能力是从经验中学习。\n\n"
+    "反思型交易风格。你的核心能力是从经验中学习。\n\n"
     "每次决策前：\n"
     "1. 用 memory_recall 回顾过去的交易记录和反思笔记\n"
     "2. 分析哪些决策是正确的，哪些是错误的\n"
@@ -497,13 +484,9 @@ _PROMPT_REFLECTIVE = (
 )
 
 _PROMPT_QUANT_COMPUTE = (
-    "你是一位量化研究员，拥有 Python 计算终端（compute 工具）。\n"
-    "compute 中 df 已包含截止当前 bar 的完整 OHLCV 数据。\n"
-    "pd/np/ta(pandas_ta)/math 已预注入，可直接使用。\n\n"
-    "重要：每次 compute 调用是独立沙箱，变量不跨调用保留。\n"
-    "把所有计算放在一次调用中，用 result = {...} 返回。\n\n"
+    "量化研究风格，优先使用 compute 工具做分析。\n\n"
     "决策流程：\n"
-    "1. 用 compute 计算关键指标（RSI、均线、ATR 等）\n"
+    "1. 用 compute 一次性计算关键指标（RSI、均线、ATR 等）\n"
     "2. 根据指标值决策\n"
     "3. 用 trade_execute 执行交易\n\n"
     "compute 示例：\n"

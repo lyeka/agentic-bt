@@ -68,6 +68,9 @@ def test_market_history(): pass
 @scenario("features/tools.feature", "market_history 请求超出可用范围时返回所有可用的")
 def test_market_history_truncated(): pass
 
+@scenario("features/tools.feature", "工具描述包含返回值说明")
+def test_tool_descriptions(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Background fixture
@@ -337,3 +340,21 @@ def then_history_exactly_n_records(tctx, n):
     result = tctx["result"]
     assert "history" in result, f"result has no 'history': {result}"
     assert len(result["history"]) == n, f"expected {n}, got {len(result['history'])}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 工具描述质量验证
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_tool_description(tctx, tool_name: str) -> str:
+    schemas = tctx["kit"].schemas
+    for s in schemas:
+        if s["function"]["name"] == tool_name:
+            return s["function"]["description"]
+    raise AssertionError(f"tool {tool_name!r} not found in schemas")
+
+
+@then(parsers.parse('{tool} 描述应包含 "{text}"'))
+def then_tool_desc_contains(tctx, tool, text):
+    desc = _get_tool_description(tctx, tool)
+    assert text in desc, f"'{text}' not in {tool} description: {desc}"

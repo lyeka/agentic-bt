@@ -541,6 +541,10 @@ class Engine:
 
     # ── 内部工具 ──────────────────────────────────────────────────────────────
 
+    def current_price(self, symbol: str | None = None) -> float:
+        """当前 bar 收盘价（公共接口，供 ContextManager 计算盈亏）"""
+        return self._current_bar(symbol).close
+
     def _current_bar(self, symbol: str | None = None) -> Bar:
         sym = symbol or self._symbol
         data = self._data_by_symbol.get(sym, self._data)

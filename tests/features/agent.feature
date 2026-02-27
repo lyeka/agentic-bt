@@ -36,3 +36,16 @@ Feature: LLM Agent 交易决策
     When Agent 做出决策
     Then decision.action 应为 "hold"
     And 不抛出异常
+
+  Scenario: System Prompt 包含框架模板和策略
+    Given 一个 mock Agent 按顺序响应工具调用后买入
+    When Agent 做出决策
+    Then LLM 收到的 system prompt 应包含 "<identity>"
+    And LLM 收到的 system prompt 应包含 "<tools_guide>"
+    And LLM 收到的 system prompt 应包含 "<decision_protocol>"
+    And LLM 收到的 system prompt 应包含 "<strategy>"
+
+  Scenario: 自定义 System Prompt 覆盖框架模板
+    Given 一个使用自定义 system prompt 的 Agent
+    When Agent 做出决策
+    Then LLM 收到的 system prompt 应为自定义内容

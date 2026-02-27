@@ -78,3 +78,9 @@ Feature: 工具桥接层
     When 推进到第 5 根 bar
     And 调用 market_history 获取最近 20 根 bar
     Then 应返回 6 条记录
+
+  Scenario: 工具描述包含返回值说明
+    When 获取工具 schema 列表
+    Then indicator_calc 描述应包含 "返回"
+    And trade_execute 描述应包含 "返回"
+    And compute 描述应包含 "返回"

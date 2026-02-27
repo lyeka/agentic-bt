@@ -1,7 +1,7 @@
 """
 [INPUT]: openai, agenticbt.models, agenticbt.tools, agenticbt.tracer
-[OUTPUT]: LLMAgent — ReAct loop 实现（含指数退避重试 + trace 写入）；AgentProtocol — 接口定义
-[POS]: Agent 层，唯一直接调用 LLM API 的组件，被 runner 驱动；_call_llm() 封装重试逻辑
+[OUTPUT]: LLMAgent — ReAct loop 实现（含三层 System Prompt 架构 + 指数退避重试 + trace 写入）；AgentProtocol — 接口定义
+[POS]: Agent 层，唯一直接调用 LLM API 的组件，被 runner 驱动；_build_system_prompt() 组装框架模板+策略；_call_llm() 封装重试逻辑
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -49,6 +49,7 @@ class LLMAgent:
         max_rounds: int = 15,
         temperature: float = 0.0,
         trace: TraceWriter | None = None,
+        system_prompt: str | None = None,
     ) -> None:
         self.model = model
         self.max_rounds = max_rounds
@@ -58,12 +59,14 @@ class LLMAgent:
         )
         self._temperature = temperature
         self.trace = trace
+        self._custom_system_prompt = system_prompt
 
     def decide(self, context: Context, toolkit: ToolKit) -> Decision:
         """ReAct loop：工具调用 → 继续，stop → 终止"""
         t0 = time.time()
+        system = self._build_system_prompt(context.playbook)
         messages = [
-            {"role": "system", "content": context.playbook},
+            {"role": "system", "content": system},
             {"role": "user",   "content": context.formatted_text},
         ]
         final_text = ""
@@ -140,6 +143,72 @@ class LLMAgent:
 
         latency_ms = (time.time() - t0) * 1000
         return self._build_decision(context, toolkit, final_text, total_tokens, latency_ms)
+
+    # ─────────────────────────────────────────────────────────────────────────
+    # System Prompt 构建
+    # ─────────────────────────────────────────────────────────────────────────
+
+    def _build_system_prompt(self, strategy: str) -> str:
+        """三级自定义：默认框架模板 / 自定义含 {strategy} 占位 / 完全覆盖"""
+        if self._custom_system_prompt:
+            if "{strategy}" in self._custom_system_prompt:
+                return self._custom_system_prompt.replace("{strategy}", strategy)
+            return self._custom_system_prompt
+        return self._build_framework_prompt() + f"\n\n<strategy>\n{strategy}\n</strategy>"
+
+    @staticmethod
+    def _build_framework_prompt() -> str:
+        """框架级 system prompt 模板 — 策略无关的通用基础设施"""
+        return """\
+<identity>
+你是一位专业的 AI 交易员。
+你根据交易策略分析市场、做出交易决策。
+你的每个决策都会被完整记录和评估。
+</identity>
+
+<environment>
+- 每根 K 线你会被要求做一次决策
+- 你的交易指令由执行引擎处理，受风控规则约束
+- 风控拒绝时会返回原因和建议，据此调整即可
+- 你只能基于当前和历史数据做决策
+</environment>
+
+<context_awareness>
+- 当前行情和账户数据已在下方提供，无需调用 market_observe 和 account_status 重复获取
+- compute 工具中 df 已包含截止当前 bar 的完整 OHLCV 数据
+- 不要在一次决策中反复调用同一工具获取相同数据
+</context_awareness>
+
+<tools_guide>
+分析阶段：
+  compute — Python 计算终端，推荐一次性计算多个指标（每次调用独立沙箱，变量不跨调用保留）
+  indicator_calc — 单指标快捷计算（适合只需一个指标的场景）
+  market_history — 完整 OHLCV 历史（仅当需要比 df 更细粒度分析时使用）
+
+执行阶段：
+  trade_execute — 执行交易（buy/sell/close），支持 market/limit/stop/bracket
+  观望时不要调用此工具，直接输出分析即可
+
+记忆阶段：
+  memory_log — 记录决策日志
+  memory_note — 创建/更新主题笔记（如持仓理由）
+  memory_recall — 检索历史记忆
+
+管理工具：
+  order_query / order_cancel — 管理挂单
+  market_observe — 查询指定 symbol 行情（仅多资产场景需要）
+  account_status — 查询最新账户状态（仅需确认最新变化时使用）
+</tools_guide>
+
+<decision_protocol>
+1. 分析：用工具获取关键指标，结合策略规则判断
+2. 决策：明确 buy/sell/close/hold，给出理由
+3. 执行：交易则调用 trade_execute，观望则直接输出分析
+4. 记录：交易后用 memory_log 记录理由
+
+先分析，再决策。不确定时观望优于盲目交易。
+不要编造数据，所有数值必须来自工具返回或上下文注入。
+</decision_protocol>"""
 
     def _call_llm(self, messages: list, tools: list) -> object | None:
         """B3: 带指数退避的 LLM 调用，失败 3 次后返回 None"""
