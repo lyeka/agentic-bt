@@ -13,7 +13,7 @@
 `features/context.feature`: 上下文工程行为规格（11 scenarios）
 `features/data.feature`: 数据生成行为规格（7 scenarios，regime 多行情模式）
 `features/tracer.feature`: 可观测性追踪行为规格（7 scenarios）
-`features/compute.feature`: 沙箱计算工具行为规格（16 scenarios：基础计算/数据访问/安全边界/错误处理/序列化）
+`features/compute.feature`: 沙箱计算工具行为规格（19 scenarios：基础计算/数据访问/安全边界/错误处理/序列化/标准Python能力）
 `test_engine.py`: engine.feature step definitions（含 recent_bars steps）
 `test_indicators.py`: indicators.feature step definitions
 `test_memory.py`: memory.feature step definitions

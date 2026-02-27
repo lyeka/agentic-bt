@@ -14,7 +14,7 @@ Agent 说意图，Framework 说真相。LLM Agent 像人类交易员一样思考
 docs/          - 设计文档 (9 篇，指导全部开发)
 src/
   agenticbt/   - 12 个业务文件
-examples/      - 策略注册表 + Mock Agent + LLM Prompt（7 策略）
+examples/      - 策略注册表 + Mock Agent + LLM Prompt（8 策略）
 tests/
   features/    - 10 个 Gherkin feature 文件（可执行规格说明）
   test_*.py    - BDD step definitions + E2E 策略测试
@@ -38,7 +38,7 @@ tests/ - BDD 测试 + E2E (25 文件: 11 features + 12 step definitions + 1 e2e)
 | indicators.py | pandas-ta 防前瞻包装，calc(name, df, bar_index) | - |
 | memory.py | 文件式记忆：Workspace 隔离 + log/note/recall | docs/memory.md |
 | tools.py | ToolKit：OpenAI function calling schema + 分发 + 调用追踪；market_observe 支持 symbol；含 compute 沙箱计算 | docs/tools.md, docs/compute.md |
-| sandbox.py | exec_compute 沙箱执行器：eval-first/白名单 globals/Trading Coreutils/SIGALRM 超时/自动降维序列化 | docs/compute.md |
+| sandbox.py | exec_compute 沙箱执行器：eval-first/黑名单 builtins/print→_stdout/Trading Coreutils/SIGALRM 超时/traceback 增强/自动降维序列化 | docs/compute.md |
 | agent.py | LLMAgent：ReAct loop（OpenAI SDK 兼容），AgentProtocol | docs/agent-protocol.md |
 | runner.py | Runner 主循环；集成 ContextManager + TraceWriter，追踪 agent_step/context/decision | docs/runner.md |
 | tracer.py | TraceWriter 本地 JSONL 追踪 + decision_to_dict 完整序列化；对齐 OTel GenAI | docs/tracer.md |
@@ -162,7 +162,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-仿真度升级完成：124/124 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱计算工具）
+仿真度升级完成：129/129 BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构：黑名单 builtins/print _stdout/traceback 增强）
 路线图：docs/roadmap.md
 
 # currentDate

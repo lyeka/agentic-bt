@@ -3,7 +3,7 @@
 
 ## 成员清单
 `__init__.py`: 包入口
-`strategies.py`: 策略注册表 + 5 个 Mock Agent 类 + 7 个 LLM Prompt + STRATEGIES dict + get_strategy/list_strategies
+`strategies.py`: 策略注册表 + 6 个 Mock Agent 类 + 8 个 LLM Prompt + STRATEGIES dict + get_strategy/list_strategies
 
 ## 策略矩阵
 
@@ -14,6 +14,7 @@
 | bollinger_limit | BollingerLimitMockAgent | 限价单/order管理/valid_bars | volatile |
 | adaptive_memory | AdaptiveMemoryMockAgent | memory_note/recall/自适应仓位 | mean_reverting |
 | multi_asset | MultiAssetMockAgent | 多资产/风控/轮动 | bull_bear |
+| quant_compute | ComputeQuantMockAgent | compute沙箱/自定义指标/ATR仓位/市场状态 | trending |
 | free_play | LLM-only | 全工具链自由探索 | random |
 | reflective | LLM-only | 记忆系统深度/自我反思 | random |
 

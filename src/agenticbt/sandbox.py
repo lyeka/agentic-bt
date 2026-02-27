@@ -1,5 +1,5 @@
 """
-[INPUT]: pandas, numpy, pandas_ta, math, signal
+[INPUT]: pandas, numpy, pandas_ta, math, signal, builtins, io, traceback
 [OUTPUT]: exec_compute — 沙箱化 Python 执行器；HELPERS — Trading Coreutils
 [POS]: compute 工具的执行层，被 tools.py 的 _compute 调用；与 Engine 无耦合
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -7,8 +7,11 @@
 
 from __future__ import annotations
 
+import builtins as _builtins
+import io
 import math
 import signal as _signal
+import traceback as _traceback
 from typing import Any
 
 import numpy as np
@@ -17,41 +20,47 @@ import pandas_ta as ta
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 白名单 globals — 禁用所有内置函数
+# 白名单 import — 允许 pandas/numpy/pandas_ta/math，拒绝其他
 # ─────────────────────────────────────────────────────────────────────────────
+
+_ALLOWED_MODULES = frozenset({"pandas", "numpy", "pandas_ta", "math"})
+
+
+def _safe_import(name: str, globals: Any = None, locals: Any = None,
+                 fromlist: tuple = (), level: int = 0) -> Any:
+    """白名单 import：顶层模块名必须在 _ALLOWED_MODULES 中"""
+    top = name.split(".")[0]
+    if top not in _ALLOWED_MODULES:
+        raise ImportError(
+            f"沙箱禁止导入 '{name}'。"
+            f"可用模块: pandas, numpy, pandas_ta, math（已预注入为 pd/np/ta/math）"
+        )
+    return _builtins.__import__(name, globals, locals, fromlist, level)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 黑名单 builtins — 从标准 builtins 移除危险项，保留 ~55 个标准条目
+# ─────────────────────────────────────────────────────────────────────────────
+
+_DANGEROUS = frozenset({
+    "open", "breakpoint", "input", "exit", "quit",
+    "compile", "exec", "eval", "__import__",
+    "globals", "locals", "vars",
+    "memoryview",
+})
+
+_safe_builtins: dict[str, Any] = {
+    k: v for k, v in _builtins.__dict__.items()
+    if k not in _DANGEROUS and not k.startswith("_")
+}
+_safe_builtins["__import__"] = _safe_import
 
 _SAFE_GLOBALS: dict[str, Any] = {
     "pd": pd,
     "np": np,
     "ta": ta,
     "math": math,
-    "__builtins__": {
-        "len": len,
-        "range": range,
-        "int": int,
-        "float": float,
-        "str": str,
-        "bool": bool,
-        "abs": abs,
-        "min": min,
-        "max": max,
-        "round": round,
-        "sum": sum,
-        "sorted": sorted,
-        "enumerate": enumerate,
-        "zip": zip,
-        "map": map,
-        "filter": filter,
-        "list": list,
-        "dict": dict,
-        "tuple": tuple,
-        "set": set,
-        "True": True,
-        "False": False,
-        "None": None,
-        "isinstance": isinstance,
-        "type": type,
-    },
+    "__builtins__": _safe_builtins,
 }
 
 
@@ -110,7 +119,11 @@ def exec_compute(
     沙箱执行 Agent 的 compute 代码。
 
     eval-first 策略：单表达式 → eval 返回值；多行 → exec 提取 result。
+    print() 输出通过 _stdout 字段返回。
     """
+    # stdout 捕获
+    stdout_buf = io.StringIO()
+
     # 构造命名空间
     local_ns: dict[str, Any] = {
         "df": df.copy(),
@@ -118,6 +131,7 @@ def exec_compute(
         "cash": account.get("cash", 0),
         "equity": account.get("equity", 0),
         "positions": account.get("positions", {}),
+        "print": lambda *a, **kw: _builtins.print(*a, file=stdout_buf, **kw),
         **HELPERS,
     }
     # 多资产注入: df_aapl, df_spy, ...
@@ -133,14 +147,19 @@ def exec_compute(
     old_handler = _signal.signal(_signal.SIGALRM, _timeout_handler)
     _signal.setitimer(_signal.ITIMER_REAL, timeout_ms / 1000)
     try:
-        return _exec_code(code, local_ns)
+        result = _exec_code(code, local_ns)
+        stdout = stdout_buf.getvalue()
+        if stdout:
+            result["_stdout"] = stdout
+        return result
     except TimeoutError:
         return {"error": "计算超时，请简化代码或减少数据量"}
     except SyntaxError as e:
         return {"error": f"SyntaxError: {e}"}
     except Exception as e:
+        tb_lines = _traceback.format_exc().strip().split("\n")
         return {"error": f"{type(e).__name__}: {e}",
-                "remediation": "检查变量名和数据访问是否正确"}
+                "traceback": "\n".join(tb_lines[-3:])}
     finally:
         _signal.setitimer(_signal.ITIMER_REAL, 0)
         _signal.signal(_signal.SIGALRM, old_handler)
@@ -149,6 +168,7 @@ def exec_compute(
 def _exec_code(code: str, local_ns: dict[str, Any]) -> dict[str, Any]:
     """eval-first：单表达式直接返回，多行 fallback 到 exec。"""
     stripped = code.strip()
+
     try:
         value = eval(stripped, _SAFE_GLOBALS, local_ns)  # noqa: S307
         return {"result": _serialize(value)}

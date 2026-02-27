@@ -2,7 +2,8 @@
 [INPUT]: agenticbt.models (Context, Decision, ToolCall, BacktestConfig, RiskConfig, CommissionConfig),
          agenticbt.tools (ToolKit), agenticbt.data (make_sample_data)
 [OUTPUT]: STRATEGIES 注册表, RsiMockAgent, BracketAtrMockAgent, BollingerLimitMockAgent,
-          AdaptiveMemoryMockAgent, MultiAssetMockAgent, get_strategy, list_strategies
+          AdaptiveMemoryMockAgent, MultiAssetMockAgent, ComputeQuantMockAgent,
+          get_strategy, list_strategies
 [POS]: 策略定义层，Mock Agent + LLM Prompt + 数据配置三位一体；被 demo.py 消费
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -332,6 +333,80 @@ class MultiAssetMockAgent:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Mock Agent 6: compute 量化研究员 — 全面展示 compute 能力
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ComputeQuantMockAgent:
+    """纯 compute 驱动：市场状态识别 + 自定义指标 + 均线交叉 + ATR 仓位计算。
+    不使用 indicator_calc，全部通过 compute 沙箱完成。"""
+
+    def decide(self, context: Context, toolkit: ToolKit) -> Decision:
+        account = toolkit.execute("account_status", {})
+        has_position = bool(account.get("positions"))
+
+        # ── compute 1: 市场状态识别（多行 exec + helper + dict 返回）──
+        regime = toolkit.execute("compute", {"code": (
+            "vol = latest(df.close.pct_change().rolling(20).std())\n"
+            "trend = df.close.iloc[-1] / df.close.iloc[-min(20, len(df))] - 1\n"
+            "result = {'regime': 'trending' if abs(trend) > 0.05 else 'ranging',"
+            " 'vol': round(vol, 4) if vol else 0, 'trend': round(trend, 4)}"
+        )})
+
+        # ── compute 2: 自定义 RSI（单表达式 eval + ta 库）──
+        rsi_r = toolkit.execute("compute", {"code": "latest(ta.rsi(df.close, 14))"})
+        rsi = rsi_r.get("result")
+
+        # ── compute 3: 均线交叉（helper crossover，bool 返回）──
+        cross_r = toolkit.execute("compute", {
+            "code": "crossover(df.close.rolling(10).mean(), df.close.rolling(30).mean())",
+        })
+        golden_cross = cross_r.get("result", False)
+
+        # ── compute 4: ATR 仓位计算（多行 exec + equity 变量）──
+        size_r = toolkit.execute("compute", {"code": (
+            "atr_val = latest(ta.atr(df.high, df.low, df.close, 14))\n"
+            "result = max(1, int(equity * 0.02 / atr_val)) if atr_val and atr_val > 0 else 0"
+        )})
+        position_size = size_r.get("result", 0)
+
+        # 提取状态
+        regime_info = regime.get("result", {}) if isinstance(regime.get("result"), dict) else {}
+        market_regime = regime_info.get("regime", "unknown")
+
+        action, symbol, qty, reasoning = "hold", None, None, ""
+        indicators = {"rsi": rsi, "regime": market_regime, "golden_cross": golden_cross,
+                       "position_size": position_size}
+
+        if rsi is not None:
+            if rsi < 45 and not has_position and (golden_cross or market_regime == "trending"):
+                qty = min(position_size, max(1, int(account["cash"] * 0.90 / account.get("equity", 1) * position_size))) if position_size else 0
+                if qty > 0:
+                    symbol = context.market["symbol"]
+                    action = "buy"
+                    reasoning = (f"compute量化: regime={market_regime} RSI={rsi:.1f}<45 "
+                                 f"cross={golden_cross} 仓位={qty}股(ATR)")
+                    toolkit.execute("trade_execute", {"action": "buy", "symbol": symbol, "quantity": qty})
+                    toolkit.execute("memory_log", {"content": f"compute买入 {symbol} {qty}股 RSI={rsi:.1f} regime={market_regime}"})
+            elif rsi > 60 and has_position:
+                symbol = context.market["symbol"]
+                action = "close"
+                reasoning = f"compute量化: RSI={rsi:.1f}>60 regime={market_regime} 平仓"
+                toolkit.execute("trade_execute", {"action": "close", "symbol": symbol})
+                toolkit.execute("memory_log", {"content": f"compute平仓 {symbol} RSI={rsi:.1f}"})
+            else:
+                reasoning = f"compute量化: RSI={rsi:.1f} regime={market_regime} cross={golden_cross} 无信号"
+        else:
+            reasoning = "compute: 数据不足"
+
+        return Decision(
+            datetime=context.datetime, bar_index=context.bar_index,
+            action=action, symbol=symbol, quantity=qty, reasoning=reasoning,
+            market_snapshot=context.market, account_snapshot=context.account,
+            indicators_used=indicators, tool_calls=list(toolkit.call_log),
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # LLM Prompt 定义
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -421,6 +496,25 @@ _PROMPT_REFLECTIVE = (
     "你的交易风格应该随着经验积累而进化。早期可以大胆试探，后期应该越来越精准。"
 )
 
+_PROMPT_QUANT_COMPUTE = (
+    "你是一位量化研究员，拥有 Python 计算终端（compute 工具）。\n"
+    "compute 中 df 已包含截止当前 bar 的完整 OHLCV 数据。\n"
+    "pd/np/ta(pandas_ta)/math 已预注入，可直接使用。\n\n"
+    "决策流程：\n"
+    "1. 用 compute 计算关键指标（RSI、均线、ATR 等）\n"
+    "2. 根据指标值决策\n"
+    "3. 用 trade_execute 执行交易\n\n"
+    "compute 示例：\n"
+    "  rsi = latest(ta.rsi(df.close, 14))\n"
+    "  sma20 = latest(df.close.rolling(20).mean())\n"
+    "  atr = latest(ta.atr(df.high, df.low, df.close, 14))\n"
+    "  cross = crossover(df.close.rolling(10).mean(), df.close.rolling(30).mean())\n"
+    "  qty = max(1, int(equity * 0.02 / atr)) if atr else 0\n"
+    "  result = {'rsi': rsi, 'sma20': sma20, 'cross': cross, 'qty': qty}\n\n"
+    "注意：ta.macd()/ta.bbands() 等在数据不足时返回 None，需判空。\n"
+    "简洁高效：2-4 个指标足以做出好决策。"
+)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # STRATEGIES 注册表
@@ -492,6 +586,15 @@ STRATEGIES: dict[str, StrategyDef] = {
         regime="random", seed=42, bars=80,
         max_rounds=25,
         features=["记忆系统深度", "自我反思"],
+    ),
+    "quant_compute": StrategyDef(
+        name="quant_compute",
+        description="compute 量化研究员 — 纯沙箱计算驱动",
+        mock_cls=ComputeQuantMockAgent,
+        llm_prompt=_PROMPT_QUANT_COMPUTE,
+        regime="trending", seed=500, bars=80,
+        decision_start_bar=30,
+        features=["compute沙箱", "自定义指标", "ATR仓位", "市场状态识别", "helper函数"],
     ),
 }
 

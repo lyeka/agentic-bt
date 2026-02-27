@@ -207,26 +207,32 @@ _SCHEMAS = [
         "function": {
             "name": "compute",
             "description": (
-                "在沙箱中执行 Python 代码分析市场数据。数据已截断到当前 bar，无法访问未来数据。\n"
+                "Execute Python code. Standard Python env with data science libs pre-loaded.\n"
                 "\n"
-                "可用变量：\n"
-                "  df — 主资产 DataFrame，列: date/open/high/low/close/volume，RangeIndex\n"
-                "  df_{sym} — 多资产场景下各资产数据（如 df_aapl, df_spy）\n"
-                "  account — dict: {cash, equity, positions: {symbol: {size, avg_price}}}\n"
-                "  cash/equity/positions — 从 account 展开的顶层变量\n"
-                "  pd/np/ta/math — pandas, numpy, pandas_ta, math\n"
+                "Pre-loaded:\n"
+                "  libs: pd(pandas), np(numpy), ta(pandas_ta), math\n"
+                "  data: df(OHLCV DataFrame), account, cash, equity, positions\n"
+                "  helpers: latest(s), prev(s,n), crossover(f,s), crossunder(f,s), above(s,v), below(s,v)\n"
+                "  multi-asset: df_{symbol} (e.g. df_aapl)\n"
                 "\n"
-                "预置函数：\n"
-                "  latest(series) — 取 Series 最新值\n"
-                "  prev(series, n=1) — 取前 N 个值\n"
-                "  crossover(fast, slow) — 金叉判断\n"
-                "  crossunder(fast, slow) — 死叉判断\n"
-                "  above(series, val) / below(series, val) — 阈值判断\n"
+                "Return: expression → auto-return; multi-line → assign `result`.\n"
+                "print() → `_stdout` field. import: pandas/numpy/pandas_ta/math only.\n"
                 "\n"
-                "返回规则：单表达式自动返回；多行代码赋值给 result。\n"
-                "示例：\n"
-                "  result = latest(ta.rsi(df.close, 14))\n"
-                "  result = int(equity * 0.02 / latest(ta.atr(df.high, df.low, df.close, 14)))"
+                "Examples:\n"
+                "\n"
+                "1) code: \"latest(ta.rsi(df.close, 14))\"\n"
+                "   → {\"result\": 55.3, \"_meta\": {\"df_rows\": 31, ...}}\n"
+                "\n"
+                "2) code: \"rsi = latest(ta.rsi(df.close, 14))\\natr = latest(ta.atr(df.high, df.low, df.close, 14))\"\n"
+                "         \"\\nqty = max(1, int(equity * 0.02 / atr)) if atr else 0\"\n"
+                "         \"\\nresult = {'rsi': rsi, 'atr': atr, 'qty': qty}\"\n"
+                "   → {\"result\": {\"rsi\": 55.3, \"atr\": 1.8, \"qty\": 11}, \"_meta\": {...}}\n"
+                "\n"
+                "3) ta returns None when data insufficient — always check:\n"
+                "   code: \"macd_df = ta.macd(df.close)\\nif macd_df is not None:\\n\"\n"
+                "         \"    result = {'macd': latest(macd_df['MACD_12_26_9'])}\\n\"\n"
+                "         \"else:\\n    result = {'macd': None, 'note': 'insufficient data'}\"\n"
+                "   → {\"result\": {\"macd\": 0.45}, \"_meta\": {...}}"
             ),
             "parameters": {
                 "type": "object",
@@ -438,4 +444,6 @@ class ToolKit:
             },
         }
 
-        return exec_compute(code, df, account, extra_dfs=extra_dfs)
+        result = exec_compute(code, df, account, extra_dfs=extra_dfs)
+        result["_meta"] = {"df_rows": len(df), "columns": list(df.columns)}
+        return result

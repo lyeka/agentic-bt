@@ -7,13 +7,11 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 from pytest_bdd import given, parsers, scenario, then, when
 
 from agenticbt.engine import Engine
 from agenticbt.memory import Memory, Workspace
 from agenticbt.models import RiskConfig
-from agenticbt.sandbox import exec_compute
 from agenticbt.tools import ToolKit
 
 
@@ -48,8 +46,11 @@ def test_anti_lookahead(): pass
 @scenario("features/compute.feature", "防篡改 — df.copy() 隔离")
 def test_data_isolation(): pass
 
-@scenario("features/compute.feature", "禁止导入模块")
+@scenario("features/compute.feature", "禁止导入非白名单模块")
 def test_no_import(): pass
+
+@scenario("features/compute.feature", "白名单 import 正常执行")
+def test_import_whitelist(): pass
 
 @scenario("features/compute.feature", "超时保护")
 def test_timeout(): pass
@@ -68,6 +69,18 @@ def test_series_auto_latest(): pass
 
 @scenario("features/compute.feature", "numpy 类型自动转 float")
 def test_numpy_to_float(): pass
+
+
+@scenario("features/compute.feature", "print 输出通过 _stdout 返回")
+def test_print_stdout(): pass
+
+
+@scenario("features/compute.feature", "try-except 正常工作")
+def test_try_except(): pass
+
+
+@scenario("features/compute.feature", "错误时也返回 _meta")
+def test_error_with_meta(): pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -138,6 +151,30 @@ def when_compute_again(cptx, code):
 def when_compute_timeout(cptx):
     # 用大量计算触发超时（500ms）
     code = "x = 0\nwhile True:\n    x += 1"
+    cptx["result"] = cptx["kit"].execute("compute", {"code": code})
+    cptx["results"].append(cptx["result"])
+    return cptx
+
+
+@when("调用 compute 白名单 import numpy 计算均值", target_fixture="cptx")
+def when_compute_whitelist_import(cptx):
+    code = "import numpy as np\nresult = np.mean(df.close)"
+    cptx["result"] = cptx["kit"].execute("compute", {"code": code})
+    cptx["results"].append(cptx["result"])
+    return cptx
+
+
+@when("调用 compute print 后赋值 result", target_fixture="cptx")
+def when_compute_print_then_result(cptx):
+    code = "val = df.close.iloc[-1]\nprint('close:', val)\nresult = val"
+    cptx["result"] = cptx["kit"].execute("compute", {"code": code})
+    cptx["results"].append(cptx["result"])
+    return cptx
+
+
+@when("调用 compute try-except 捕获异常", target_fixture="cptx")
+def when_compute_try_except(cptx):
+    code = "try:\n    x = 1 / 0\nexcept ZeroDivisionError:\n    result = {'caught': True}"
     cptx["result"] = cptx["kit"].execute("compute", {"code": code})
     cptx["results"].append(cptx["result"])
     return cptx
@@ -229,6 +266,12 @@ def then_returns_error(cptx):
     assert "error" in cptx["result"], f"expected error, got {cptx['result']}"
 
 
+@then(parsers.parse('compute 返回包含 "{text}" 的错误'))
+def then_returns_error_with_text(cptx, text):
+    assert "error" in cptx["result"], f"expected error, got {cptx['result']}"
+    assert text in cptx["result"]["error"], f"expected '{text}' in error: {cptx['result']['error']}"
+
+
 @then("compute 返回超时错误")
 def then_returns_timeout(cptx):
     assert "error" in cptx["result"]
@@ -257,3 +300,22 @@ def then_returns_index_error(cptx):
 def then_returns_python_float(cptx):
     r = cptx["result"]["result"]
     assert type(r) is float, f"expected float, got {type(r)}"
+
+
+@then("compute 返回包含 _stdout 的结果")
+def then_returns_stdout(cptx):
+    assert "_stdout" in cptx["result"], f"expected _stdout, got {cptx['result']}"
+    assert "close:" in cptx["result"]["_stdout"]
+
+
+@then("compute 返回包含 caught 的 dict")
+def then_returns_caught_dict(cptx):
+    r = cptx["result"]["result"]
+    assert isinstance(r, dict), f"expected dict, got {type(r)}: {r}"
+    assert r.get("caught") is True
+
+
+@then("compute 返回包含 _meta 的错误结果")
+def then_returns_error_with_meta(cptx):
+    assert "error" in cptx["result"], f"expected error, got {cptx['result']}"
+    assert "_meta" in cptx["result"], f"expected _meta in error result, got {cptx['result']}"
