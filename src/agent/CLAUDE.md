@@ -18,11 +18,12 @@
 
 ### adapters/
 `__init__.py`: 适配器层入口
-`cli.py`: CLI REPL 交互通道，驱动 Kernel.turn()
+`cli.py`: CLI REPL 完整入口（dotenv + boot + 6 工具注册 + 权限 + Session 持久化）
 
 ### adapters/market/
 `__init__.py`: 市场数据适配器入口
 `csv.py`: CsvAdapter — 基于 DataFrame dict 的测试用 MarketAdapter
+`tushare.py`: TushareAdapter — A 股日线 OHLCV，tushare Pro API
 
 ### bootstrap/
 `__init__.py`: 自举包入口

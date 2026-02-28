@@ -11,6 +11,8 @@ dependencies = [
     "openai>=1.0",
     "pandas>=2.0",
     "pandas-ta",
+    "tushare",
+    "python-dotenv",
 ]
 
 [project.optional-dependencies]

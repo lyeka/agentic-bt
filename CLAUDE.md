@@ -1,5 +1,5 @@
 # AgenticBT - Agent 时代的量化回测框架
-Python 3.10+ · openai · pandas · pandas-ta · pytest-bdd
+Python 3.10+ · openai · pandas · pandas-ta · tushare · python-dotenv · pytest-bdd
 
 > "Backtest the Trader, Not Just the Strategy."
 > 回测交易员，而不仅仅是策略。
@@ -28,10 +28,10 @@ pyproject.toml - Python 包配置（venv: .venv/）
 docs/ - 完整设计文档集 (12 文件: architecture, engine, tools, compute, memory, context, eval, agent-protocol, runner, tracer, roadmap, tech-design)
 src/core/ - 公共基础包 (4 文件: __init__, sandbox, indicators, tracer)
 src/agenticbt/ - 回测框架 (13 文件: __init__, models, engine, indicators, memory, tools, sandbox, context, agent, runner, eval, data, tracer)
-src/agent/ - 持久投资助手 (14 文件: kernel + 4 tools + 3 adapters + 2 bootstrap + 4 __init__)
+src/agent/ - 持久投资助手 (15 文件: kernel + 4 tools + 4 adapters + 2 bootstrap + 4 __init__)
 scripts/ - 分析脚本 (1 文件: analyze_trace)
 examples/ - 策略模块 (2 文件: __init__, strategies)
-tests/ - BDD 测试 + E2E (29 文件: 12 features + 14 step definitions + 1 e2e + conftest + 1 __init__)
+tests/ - BDD 测试 + E2E (31 文件: 13 features + 15 step definitions + 1 e2e + conftest + 1 __init__)
 </directory>
 
 ## 核心模块
@@ -170,7 +170,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-仿真度升级完成：170 BDD scenarios 全绿。agenticbt 回测框架完成（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构 + Agent 设计重构）。agent 持久投资助手 Phase 1 完成（Kernel + 6 工具 + 权限 + 自举 + Session 持久化）。
+仿真度升级完成：175 BDD scenarios 全绿。agenticbt 回测框架完成（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构 + Agent 设计重构）。agent 持久投资助手 Phase 1 完成（Kernel + 6 工具 + 权限 + 自举 + Session 持久化）。CLI MVP 完成（TushareAdapter + dotenv + 完整 boot 流程）。
 路线图：docs/roadmap.md
 
 # currentDate

@@ -30,5 +30,7 @@
 `test_kernel.py`: kernel.feature step definitions（fixture: kctx，Mock LLM）
 `features/kernel_tools.feature`: Kernel 工具与工作区行为规格（10 scenarios：market/compute/read/write/edit/权限/recall/Session 持久化/自举）
 `test_kernel_tools.py`: kernel_tools.feature step definitions（fixture: ktctx，直接调用 handler）
+`features/tushare_adapter.feature`: TushareAdapter 行为规格（5 scenarios：列名标准化/日期类型/排序/日期范围透传/默认范围）
+`test_tushare_adapter.py`: tushare_adapter.feature step definitions（fixture: tsctx，mock tushare API）
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
