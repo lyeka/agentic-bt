@@ -1,5 +1,5 @@
 """
-[INPUT]: openai, agenticbt.models, agenticbt.tools, agenticbt.tracer
+[INPUT]: openai, agenticbt.models, agenticbt.tools, core.tracer
 [OUTPUT]: LLMAgent — ReAct loop 实现（含三层 System Prompt 架构 + 指数退避重试 + trace 写入）；AgentProtocol — 接口定义
 [POS]: Agent 层，唯一直接调用 LLM API 的组件，被 runner 驱动；_build_system_prompt() 组装框架模板+策略；_call_llm() 封装重试逻辑
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -14,9 +14,10 @@ from typing import Protocol, runtime_checkable
 
 import openai
 
+from core.tracer import TraceWriter
+
 from .models import Context, Decision, ToolCall
 from .tools import ToolKit
-from .tracer import TraceWriter
 
 
 # ─────────────────────────────────────────────────────────────────────────────

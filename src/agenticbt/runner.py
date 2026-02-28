@@ -1,5 +1,5 @@
 """
-[INPUT]: agenticbt.engine, agenticbt.memory, agenticbt.tools, agenticbt.models, agenticbt.eval, agenticbt.context, agenticbt.tracer
+[INPUT]: agenticbt.engine, agenticbt.memory, agenticbt.tools, agenticbt.models, agenticbt.eval, agenticbt.context, agenticbt.tracer, core.tracer
 [OUTPUT]: Runner — 回测主循环编排器
 [POS]: 顶层编排器，连接 Engine/Memory/Agent/Eval；_trigger_memory_moments() 在成交时写入记忆；内置 TraceWriter 追踪
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pandas as pd
 
+from core.tracer import TraceWriter
+
 from .agent import AgentProtocol
 from .context import ContextManager
 from .engine import Engine
@@ -20,7 +22,7 @@ from .eval import Evaluator
 from .memory import Memory, Workspace
 from .models import BacktestConfig, BacktestResult, Decision
 from .tools import ToolKit
-from .tracer import TraceWriter, decision_to_dict
+from .tracer import decision_to_dict
 
 
 # ─────────────────────────────────────────────────────────────────────────────

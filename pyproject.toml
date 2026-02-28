@@ -20,7 +20,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agenticbt"]
+packages = ["src/agenticbt", "src/core", "src/agent"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -11,9 +11,11 @@ Agent 说意图，Framework 说真相。LLM Agent 像人类交易员一样思考
 ## 目录结构
 
 ```
-docs/          - 设计文档 (9 篇，指导全部开发)
+docs/          - 设计文档 (12 篇，指导全部开发)
 src/
-  agenticbt/   - 12 个业务文件
+  core/        - 公共基础包 (4 文件: sandbox/indicators/tracer)
+  agenticbt/   - 回测框架 (13 文件，import core/)
+  agent/       - 持久投资助手 (Phase 1 完成: Kernel + 6 工具 + 权限 + 自举)
 scripts/       - 分析脚本 (trace 分析报告)
 examples/      - 策略注册表 + Mock Agent + LLM Prompt（8 策略）
 tests/
@@ -23,8 +25,10 @@ pyproject.toml - Python 包配置（venv: .venv/）
 ```
 
 <directory>
-docs/ - 完整设计文档集 (11 文件: architecture, engine, tools, compute, memory, context, eval, agent-protocol, runner, tracer, roadmap)
-src/agenticbt/ - 核心业务代码 (13 文件: __init__, models, engine, indicators, memory, tools, sandbox, context, agent, runner, eval, data, tracer)
+docs/ - 完整设计文档集 (12 文件: architecture, engine, tools, compute, memory, context, eval, agent-protocol, runner, tracer, roadmap, tech-design)
+src/core/ - 公共基础包 (4 文件: __init__, sandbox, indicators, tracer)
+src/agenticbt/ - 回测框架 (13 文件: __init__, models, engine, indicators, memory, tools, sandbox, context, agent, runner, eval, data, tracer)
+src/agent/ - 持久投资助手 (3 文件: __init__, kernel, adapters/cli)
 scripts/ - 分析脚本 (1 文件: analyze_trace)
 examples/ - 策略模块 (2 文件: __init__, strategies)
 tests/ - BDD 测试 + E2E (25 文件: 11 features + 12 step definitions + 1 e2e)
@@ -34,10 +38,12 @@ tests/ - BDD 测试 + E2E (25 文件: 11 features + 12 step definitions + 1 e2e)
 
 | 模块 | 职责 | 设计文档 |
 |------|------|---------|
-| engine.py | 确定性市场模拟：数据回放、订单撮合、仓位核算、风控拦截 | docs/engine.md |
-| indicators.py | pandas-ta 防前瞻包装，calc(name, df, bar_index) | - |
+| **core/** | | |
+| core/sandbox.py | exec_compute 沙箱执行器：eval-first/黑名单 builtins/Trading Coreutils/SIGALRM 超时/自动降维 | docs/compute.md |
+| core/indicators.py | IndicatorEngine，pandas-ta 防前瞻包装，6 指标 | - |
+| core/tracer.py | TraceWriter 本地 JSONL 追踪，对齐 OTel GenAI | docs/tracer.md |
+| **agenticbt/** | | |
 | engine.py | 确定性市场模拟：多资产数据/market+limit+stop+bracket 订单/多空/风控4检查/百分比滑点/部分成交/risk_summary() 风控约束摘要 | docs/engine.md |
-| indicators.py | pandas-ta 防前瞻包装，calc(name, df, bar_index) | - |
 | memory.py | 文件式记忆：Workspace 隔离 + log/note/recall | docs/memory.md |
 | tools.py | ToolKit：OpenAI function calling schema（含完整 API 文档 + 风控重试提示） + 分发 + 调用追踪；含 compute 沙箱计算 | docs/tools.md, docs/compute.md |
 | sandbox.py | exec_compute 沙箱执行器：eval-first/黑名单 builtins/print→_stdout/Trading Coreutils（含 bbands/macd helper）/SIGALRM 超时/traceback 增强/自动降维序列化 | docs/compute.md |

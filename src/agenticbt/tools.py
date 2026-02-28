@@ -1,5 +1,5 @@
 """
-[INPUT]: agenticbt.engine, agenticbt.indicators, agenticbt.memory, agenticbt.models, agenticbt.sandbox
+[INPUT]: agenticbt.engine, agenticbt.memory, agenticbt.models, core.indicators, core.sandbox
 [OUTPUT]: ToolKit — 工具桥接层，提供 schemas/execute/call_log/indicator_queries/trade_actions；_TOOL_REMEDIATION — 错误提示常量
 [POS]: Agent 和 Engine/Memory 的中间层，OpenAI function calling 格式适配；execute() 带异常防御；含 compute 沙箱计算工具
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from core.indicators import IndicatorEngine
+from core.sandbox import exec_compute
+
 from .engine import Engine
-from .indicators import IndicatorEngine
 from .memory import Memory
 from .models import ToolCall
-from .sandbox import exec_compute
 
 
 # ─────────────────────────────────────────────────────────────────────────────
