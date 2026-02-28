@@ -6,7 +6,7 @@ AgenticBT 完整设计文档集，指导全部开发工作。
 ## 成员清单
 
 architecture.md: 架构总览，设计哲学，模块关系图，与现有框架对比
-agent-platform.md: 通用常驻 Agent（极简内核 + Skills 扩展）产品与架构设计（特性定盘：常驻/恢复/Memory/Skills/Subagents/Scheduler/Workspace）
+agent-platform.md: 个人投资助手仿生学架构设计（OHLCV 内核原语/market.ohlcv 适配器/compute 自动注入/Soul 灵魂系统/Memory 内化认知/Notebook 外化产物/预连通管道/成长循环/Tool Provider/Default Profile/Skills）
 engine.md: 确定性引擎，数据回放/指标计算/订单撮合/仓位核算/风控拦截
 tools.md: 五个核心工具组设计，market/indicator/account/trade/memory 接口定义
 compute.md: 沙箱化 Python 计算工具设计，eval-first 策略/Trading Coreutils/安全边界/可行性审查
