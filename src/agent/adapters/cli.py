@@ -1,6 +1,6 @@
 """
 [INPUT]: dotenv, json, agent.kernel, agent.tools.*, agent.adapters.market.tushare
-[OUTPUT]: main — 完整 CLI 入口（boot + 6 工具 + 权限 + Session 持久化 + JSONL trace）
+[OUTPUT]: main — 完整 CLI 入口（boot + 7 工具 + 权限 + Session 持久化 + JSONL trace）
 [POS]: 用户交互通道，驱动完整 Kernel 生命周期
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 from agent.kernel import Kernel, Permission, Session
 from agent.adapters.market.tushare import TushareAdapter
-from agent.tools import compute, market, primitives, recall
+from agent.tools import bash, compute, edit, market, read, recall, write
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -47,22 +47,27 @@ def main() -> None:
     # ── 2. 创建 Kernel ──
     kernel = Kernel(model=model, base_url=base_url, api_key=api_key)
 
-    # ── 3. 注册 6 工具 ──
+    # ── 3. 注册 7 工具 ──
+    cwd = Path.cwd()
     if tushare_token:
         adapter = TushareAdapter(token=tushare_token)
         market.register(kernel, adapter)
     compute.register(kernel)
-    primitives.register(kernel, workspace)
+    read.register(kernel, workspace, cwd)
+    write.register(kernel, workspace, cwd)
+    edit.register(kernel, workspace, cwd)
     recall.register(kernel, workspace)
+    bash.register(kernel, cwd=cwd)
 
     # ── 4. 声明权限 ──
     kernel.permission("soul.md", Permission.USER_CONFIRM)
     kernel.permission("memory/**", Permission.FREE)
     kernel.permission("notebook/**", Permission.FREE)
+    kernel.permission("__external__", Permission.USER_CONFIRM)
 
     # ── 4.5 确认回调 ──
     def _cli_confirm(path: str) -> bool:
-        answer = input(f"\n确认修改 {path}? [y/n] ").strip().lower()
+        answer = input(f"\n确认操作 {path}? [y/n] ").strip().lower()
         return answer in ("y", "yes")
 
     kernel.on_confirm(_cli_confirm)

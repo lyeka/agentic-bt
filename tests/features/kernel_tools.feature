@@ -26,7 +26,7 @@ Feature: Kernel 工具与工作区 — Phase 1b/1c 完整验证
     Given 一个带文件工具的 Kernel
     And 工作区已有文件 "memory/note.md" 内容 "test content"
     When 调用 read path "memory/note.md"
-    Then 结果内容为 "test content"
+    Then 结果内容包含 "test content"
 
   Scenario: edit 修改文件
     Given 一个带文件工具的 Kernel

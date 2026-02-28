@@ -12,7 +12,7 @@ from pytest_bdd import given, parsers, scenario, then, when
 
 from agent.kernel import Kernel, Permission, Session
 from agent.adapters.market.csv import CsvAdapter
-from agent.tools import compute, market, primitives, recall
+from agent.tools import compute, edit, market, read, recall, write
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -88,7 +88,9 @@ def given_kernel_with_files(tmp_path):
     kernel = Kernel(api_key="test")
     workspace = tmp_path / "workspace"
     workspace.mkdir()
-    primitives.register(kernel, workspace)
+    read.register(kernel, workspace, cwd=workspace)
+    write.register(kernel, workspace, cwd=workspace)
+    edit.register(kernel, workspace, cwd=workspace)
     recall.register(kernel, workspace)
     return {"kernel": kernel, "workspace": workspace}
 
@@ -230,9 +232,9 @@ def then_file_content(ktctx, path, content):
     assert fp.read_text(encoding="utf-8") == content
 
 
-@then(parsers.parse('结果内容为 "{content}"'))
+@then(parsers.parse('结果内容包含 "{content}"'))
 def then_result_content(ktctx, content):
-    assert ktctx["result"]["content"] == content
+    assert content in ktctx["result"]["content"]
 
 
 @then("结果包含 error")

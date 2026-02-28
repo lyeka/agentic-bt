@@ -32,5 +32,7 @@
 `test_kernel_tools.py`: kernel_tools.feature step definitions（fixture: ktctx，直接调用 handler）
 `features/tushare_adapter.feature`: TushareAdapter 行为规格（5 scenarios：列名标准化/日期类型/排序/日期范围透传/默认范围）
 `test_tushare_adapter.py`: tushare_adapter.feature step definitions（fixture: tsctx，mock tushare API）
+`features/agent_tools.feature`: Agent 工具系统行为规格（20 scenarios：read 分页截断行号/edit 模糊匹配唯一性diff/write 字节数/bash 超时截断/路径安全）
+`test_agent_tools.py`: agent_tools.feature step definitions（fixture: atx，MockKernel + 双信任区域）
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
