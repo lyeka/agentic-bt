@@ -4,56 +4,51 @@
 > 回测交易员，而不仅仅是策略。
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![BDD Tests](https://img.shields.io/badge/BDD%20tests-38%20scenarios-brightgreen)
+![BDD Tests](https://img.shields.io/badge/BDD%20tests-170%20scenarios-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
-传统回测框架测试**信号规则**。AgenticBT 测试**一个 AI 交易员**——
+两个系统，一套哲学：**Agent 说意图，Framework 说真相。**
 
-它会使用工具查询行情、计算指标、执行订单、记录决策，就像一位实习分析师。你给它历史数据和策略描述，它用 LLM 推理做出每一个交易决策。框架记录整个过程，评估绩效与策略遵循度。
-
-**换一个模型，就换了一位交易员。** 换一段 prompt，就换了一套策略。
-
----
-
-## 特性
-
-- **一行启动**：`run(BacktestConfig(...))` 驱动完整回测
-- **Provider 无关**：`base_url` 参数切换 Claude / GPT / Ollama，代码零改动
-- **确定性引擎**：数据回放、订单撮合、仓位核算、风控拦截——全部可重现
-- **5 工具生态**：market · indicator · account · trade · memory，Agent 通过工具感知和行动
-- **双维度评估**：绩效指标（收益率/夏普/胜率）× 策略遵循度（工具使用/行为分布）
-- **BDD 驱动**：38 个 Gherkin scenarios，既是测试套件，也是模块规格说明
-- **无 API key 即可运行**：`--mock` 模式用规则 Agent 验证完整回测链路
+| 系统 | 定位 | 状态 |
+|------|------|------|
+| `agenticbt` | 量化回测框架 — LLM Agent 像交易员一样决策，确定性引擎负责数据/计算/执行 | 完成 |
+| `agent` | 持久投资助手 — Kernel-centric 架构，6 工具 + 声明式管道 + 自举 | Phase 1 完成 |
+| `core` | 公共基础 — 沙箱/指标/追踪，两个系统共享 | 完成 |
 
 ---
 
 ## 架构
 
+### agenticbt — 回测框架
+
 ```
-┌────────────────────────────────────────────────────────────┐
-│                         Runner                             │
-│                                                            │
-│  ┌──────────┐   ┌──────────────────┐   ┌──────────────┐   │
-│  │  Engine  │──▶│  ContextManager  │──▶│   LLMAgent   │   │
-│  │ (确定性) │   │  (六层上下文)    │   │ (ReAct Loop) │   │
-│  └──────────┘   └──────────────────┘   └──────┬───────┘   │
-│       ▲                                        │           │
-│       │               ToolKit ◀────────────────┘           │
-│       │          ┌──────────────────────┐                  │
-│       └──────────│ market   indicator   │                  │
-│                  │ account  trade       │                  │
-│                  │ memory               │                  │
-│                  └──────────────────────┘                  │
-│  ┌──────────┐                            ┌─────────────┐   │
-│  │  Memory  │                            │  Evaluator  │   │
-│  │ (文件式) │                            │ 绩效 + 遵循 │   │
-│  └──────────┘                            └─────────────┘   │
-└────────────────────────────────────────────────────────────┘
+Runner
+  ├── Engine (确定性)  →  ContextManager (五层上下文)  →  LLMAgent (ReAct Loop)
+  │     ▲                                                      │
+  │     └──────────── ToolKit ◀────────────────────────────────┘
+  │                   market · indicator · account · trade · memory
+  ├── Memory (文件式)
+  └── Evaluator (绩效 + 遵循度)
 ```
 
-**分工原则**：Agent 说意图，Engine 说真相。LLM 负责推理和决策，引擎负责数据、计算和执行。
+### agent — 持久投资助手
+
+```
+Adapters (CLI / Telegram)
+       │
+    Kernel
+    ├── turn()  ← ReAct loop
+    ├── wire()  ← 声明式管道（fnmatch 路径模式）
+    ├── emit()  ← 管道触发
+    ├── boot()  ← 自举（检测 soul.md → 注入系统提示词）
+    ├── data    ← DataStore
+    └── 6 Tools
+        read · write · edit · compute · market.ohlcv · recall
+```
+
+Pi-inspired 工具哲学：read/write/edit 是通用原语，覆盖所有文件操作；compute/market.ohlcv/recall 是不可替代的领域工具。
 
 ---
 
@@ -64,37 +59,45 @@
 ```bash
 git clone https://github.com/your-org/agentic-bt.git
 cd agentic-bt
-pip install -e ".[dev]"
+python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 ```
 
-### Mock 模式（无需 API key，立即验证）
+### 回测框架
 
 ```bash
+# Mock demo（无需 API key，8 种策略）
 python demo.py --mock
+python demo.py --mock --strategy bracket_atr
+python demo.py --mock --strategy all
+
+# 真实 LLM — Claude
+ANTHROPIC_API_KEY=sk-ant-... python demo.py --strategy free_play
+
+# GPT + 自定义 CSV
+OPENAI_API_KEY=sk-... python demo.py --provider openai --csv your_data.csv
 ```
 
-输出完整的回测报告：绩效指标、遵循度统计、决策日志样本。
-
-### 真实 LLM — Claude（推荐）
+### 投资助手 CLI
 
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... python demo.py --provider claude
+# 启动 CLI 对话（需要 LLM API key）
+OPENAI_API_KEY=sk-... python -m agent.adapters.cli
 ```
 
-### 切换其他 Provider
+首次启动时工作区为空，Agent 通过种子对话了解你的投资风格，然后用 write 工具自己创建 soul.md 和 memory/ 结构。
+
+### 运行测试
 
 ```bash
-# GPT-4o
-OPENAI_API_KEY=sk-... python demo.py --provider openai
+# 全量 BDD（170 scenarios）
+.venv/bin/pytest tests/ -v
 
-# 本地 Ollama（无需 key）
-python demo.py --provider ollama --model qwen2.5:7b
+# 单模块
+.venv/bin/pytest tests/test_kernel.py -v
+.venv/bin/pytest tests/test_engine.py -v
 
-# 自定义 bar 数量和标的
-python demo.py --mock --symbol TSLA --bars 120
-
-# 加载本地 CSV
-python demo.py --mock --csv AAPL_sample.csv
+# 按关键词
+.venv/bin/pytest tests/ -k "market"
 ```
 
 ---
@@ -111,7 +114,7 @@ df = make_sample_data("AAPL", periods=252)
 result = run(BacktestConfig(
     data=df,
     symbol="AAPL",
-    strategy_prompt="RSI < 35 时买入，RSI > 65 时平仓，每次必须先 market_observe 再 indicator_calc",
+    strategy_prompt="RSI < 35 时买入，RSI > 65 时平仓",
     model="claude-sonnet-4-20250514",
     base_url="https://api.anthropic.com/v1/",
     api_key="sk-ant-...",
@@ -121,51 +124,31 @@ p = result.performance
 print(f"总收益率  {p.total_return:+.2%}")
 print(f"最大回撤  {p.max_drawdown:.2%}")
 print(f"夏普比率  {p.sharpe_ratio:.3f}")
-print(f"胜率      {p.win_rate:.1%}  ({p.total_trades} 笔)")
-print(f"工作空间  {result.workspace_path}")
 ```
 
-### 加载真实 CSV
+### 投资助手 Kernel
 
 ```python
-from agenticbt import load_csv
+from agent.kernel import Kernel, Session
+from agent.tools import market, compute, primitives, recall
+from agent.adapters.market.csv import CsvAdapter
 
-# 兼容 Yahoo Finance / AKShare / Tushare 等常见格式
-df = load_csv("path/to/AAPL.csv")
-```
+kernel = Kernel(model="gpt-4o-mini", api_key="sk-...")
+kernel.boot(Path("./workspace"))
 
-### 自定义 Agent
+# 注册工具
+primitives.register(kernel, Path("./workspace"))
+market.register(kernel, CsvAdapter({"300750": df}))
+compute.register(kernel)
+recall.register(kernel, Path("./workspace"))
 
-只需实现 `decide(context, toolkit) -> Decision`：
+# 声明式管道
+kernel.wire("write:notebook/**", my_index_handler)
+kernel.permission("soul.md", Permission.USER_CONFIRM)
 
-```python
-from agenticbt.models import Decision
-from agenticbt.tools import ToolKit
-
-class MyRuleAgent:
-    def decide(self, context: dict, toolkit: ToolKit) -> Decision:
-        market = toolkit.execute("market_observe", {})
-        rsi    = toolkit.execute("indicator_calc", {"name": "RSI", "period": 14})
-
-        action, symbol, qty = "hold", None, None
-        if rsi.get("value", 50) < 35 and not context["account"]["positions"]:
-            qty    = int(context["account"]["cash"] * 0.9 / market["close"])
-            action = "buy"
-            symbol = context["market"]["symbol"]
-            toolkit.execute("trade_execute", {"action": "buy", "symbol": symbol, "quantity": qty})
-
-        return Decision(
-            datetime=context["datetime"],
-            bar_index=context["bar_index"],
-            action=action, symbol=symbol, quantity=qty,
-            reasoning=f"RSI={rsi.get('value'):.1f}",
-            market_snapshot=context["market"],
-            account_snapshot=context["account"],
-            indicators_used={"RSI": rsi.get("value")},
-            tool_calls=list(toolkit.call_log),
-        )
-
-result = run(BacktestConfig(data=df, symbol="AAPL", strategy_prompt=""), agent=MyRuleAgent())
+# 对话
+session = Session(session_id="cli-1")
+reply = kernel.turn("分析一下宁德时代最近的走势", session)
 ```
 
 ---
@@ -180,81 +163,33 @@ result = run(BacktestConfig(data=df, symbol="AAPL", strategy_prompt=""), agent=M
 | OpenAI GPT | `None`（默认） | `OPENAI_API_KEY` |
 | Ollama（本地） | `"http://localhost:11434/v1/"` | `"ollama"` |
 | OpenRouter | `"https://openrouter.ai/api/v1/"` | OpenRouter key |
-| 任意 OpenAI 兼容端点 | 自定义 URL | 对应 key |
-
-```python
-# 换 Provider = 改两个参数，零代码变更
-config = BacktestConfig(
-    ...,
-    model="gpt-4o-mini",
-    base_url=None,          # OpenAI 默认
-    api_key="sk-...",
-)
-```
 
 ---
 
-## 5 个核心工具
+## 工具体系
 
-Agent 通过工具与世界交互，所有调用均被记录在 `Decision.tool_calls`：
+### agenticbt — 回测工具（5 个）
 
 | 工具 | 参数示例 | 返回 |
 |------|---------|------|
 | `market_observe` | `{}` | `{open, high, low, close, volume, datetime}` |
 | `indicator_calc` | `{"name": "RSI", "period": 14}` | `{"value": 32.5}` |
-| `indicator_calc` | `{"name": "MACD"}` | `{"macd": ..., "signal": ..., "histogram": ...}` |
-| `account_status` | `{}` | `{cash, equity, positions: {symbol: {qty, avg_price}}}` |
+| `account_status` | `{}` | `{cash, equity, positions}` |
 | `trade_execute` | `{"action": "buy", "symbol": "AAPL", "quantity": 100}` | `{"status": "submitted"}` |
-| `memory_log` | `{"content": "RSI 超卖，买入 AAPL"}` | `{"ok": true}` |
-| `memory_note` | `{"key": "thesis", "content": "均值回归"}` | `{"ok": true}` |
-| `memory_recall` | `{"query": "上次买入"}` | `{"results": [...]}` |
+| `memory_log/note/recall` | `{"content": "..."}` | `{"ok": true}` |
 
-支持的技术指标：**RSI · SMA · EMA · ATR · MACD · BBANDS**
+支持指标：RSI · SMA · EMA · ATR · MACD · BBANDS
 
----
+### agent — 投资助手工具（6 个）
 
-## 模块参考
-
-| 模块 | 职责 |
-|------|------|
-| `models.py` | 所有 dataclass：Bar · Order · Fill · Position · Decision · BacktestConfig · ... |
-| `engine.py` | 确定性市场模拟：数据回放 / 订单撮合（下一 bar 开盘价成交）/ 风控 |
-| `indicators.py` | pandas-ta 包装，防前瞻（严格切片 `df[:bar+1]`） |
-| `memory.py` | 文件式记忆：每次回测独立 workspace，journal / notes / recall |
-| `tools.py` | OpenAI function calling schema + 工具分发 + 调用追踪 |
-| `agent.py` | `LLMAgent`（ReAct loop，max_rounds 保护）+ `AgentProtocol`（鸭子类型） |
-| `runner.py` | 主循环：advance → match → assemble_context → decide → record |
-| `eval.py` | `Evaluator`：绩效（真实 PnL）+ 遵循度（行为分布 / 工具使用率） |
-| `data.py` | `load_csv`（多格式兼容）+ `make_sample_data`（几何布朗运动） |
-
----
-
-## 开发
-
-### 运行测试
-
-```bash
-# 全部 BDD scenarios（38 个）
-pytest tests/ -v
-
-# 单模块
-pytest tests/ -v -k "engine"
-pytest tests/ -v -k "agent"
-
-# 简洁输出
-pytest tests/ --tb=short -q
-```
-
-### BDD 驱动开发循环
-
-```
-① 在 tests/features/<module>.feature 写 Gherkin 场景  →  RED
-② 在 tests/test_<module>.py 实现 step definitions
-③ 在 src/agenticbt/<module>.py 实现业务代码            →  GREEN
-④ pytest 全通，提交
-```
-
-Feature 文件是活的规格说明——读 `.feature` 即读模块行为契约，无需查源码。
+| 工具 | 类型 | 说明 |
+|------|------|------|
+| `read(path)` | 通用原语 | 读 workspace 任意文件 |
+| `write(path, content)` | 通用原语 | 写 workspace 任意文件（自动创建目录） |
+| `edit(path, old, new)` | 通用原语 | diff-based 精准修改 |
+| `compute(code)` | 领域增强 | 沙箱 Python，自动注入 OHLCV + Trading Coreutils |
+| `market.ohlcv(symbol)` | 领域核心 | 获取行情，adapter pattern 解耦数据源 |
+| `recall(query)` | 领域增强 | 全文搜索 memory + notebook |
 
 ---
 
@@ -262,49 +197,114 @@ Feature 文件是活的规格说明——读 `.feature` 即读模块行为契约
 
 ```
 agentic-bt/
-├── demo.py                  # CLI 端到端演示（mock + 真实 LLM）
-├── AAPL_sample.csv          # 252 根模拟 bar，开箱即用
-├── pyproject.toml           # 依赖: openai + pandas + pandas-ta
+├── demo.py                     # CLI 端到端演示
+├── pyproject.toml              # 依赖: openai + pandas + pandas-ta
 ├── src/
-│   └── agenticbt/
-│       ├── __init__.py      # 公共 API: run / BacktestConfig / LLMAgent / load_csv
-│       ├── models.py        # 数据结构基础层
-│       ├── engine.py        # 确定性市场模拟
-│       ├── indicators.py    # 技术指标（防前瞻）
-│       ├── memory.py        # 文件式记忆
-│       ├── tools.py         # 工具 schema + 分发
-│       ├── agent.py         # LLMAgent ReAct loop
-│       ├── runner.py        # 回测主循环
-│       ├── eval.py          # 评估系统
-│       └── data.py          # 数据加载 + 生成
+│   ├── core/                   # 公共基础（两个系统共享）
+│   │   ├── sandbox.py          # 沙箱执行器（eval-first/黑名单/Trading Coreutils/超时）
+│   │   ├── indicators.py       # pandas-ta 防前瞻包装（6 指标）
+│   │   └── tracer.py           # JSONL 追踪（对齐 OTel GenAI）
+│   │
+│   ├── agenticbt/              # 回测框架（13 文件）
+│   │   ├── models.py           # 数据结构基础层
+│   │   ├── engine.py           # 确定性市场模拟（多资产/bracket/风控/部分成交）
+│   │   ├── agent.py            # LLMAgent（三层 System Prompt + ReAct loop）
+│   │   ├── runner.py           # 回测主循环
+│   │   ├── context.py          # 五层认知上下文 + XML 格式化
+│   │   ├── tools.py            # 工具 schema + 分发
+│   │   ├── eval.py             # 绩效指标 + 遵循度
+│   │   ├── memory.py           # 文件式记忆
+│   │   ├── data.py             # 数据加载 + 模拟生成
+│   │   └── tracer.py           # decision_to_dict 序列化
+│   │
+│   └── agent/                  # 持久投资助手
+│       ├── kernel.py           # Kernel（ReAct + wire/emit + Permission + boot）
+│       ├── tools/
+│       │   ├── primitives.py   # read / write / edit
+│       │   ├── compute.py      # 沙箱 Python
+│       │   ├── market.py       # MarketAdapter Protocol
+│       │   └── recall.py       # 全文搜索
+│       ├── adapters/
+│       │   ├── cli.py          # CLI REPL
+│       │   └── market/csv.py   # 测试用 CsvAdapter
+│       └── bootstrap/
+│           └── seed.py         # 自举种子 prompt
+│
 ├── tests/
-│   ├── features/            # 7 个 Gherkin feature 文件
-│   │   ├── engine.feature
-│   │   ├── indicators.feature
-│   │   ├── memory.feature
-│   │   ├── tools.feature
-│   │   ├── agent.feature
-│   │   ├── runner.feature
-│   │   └── eval.feature
-│   ├── test_engine.py
-│   ├── test_indicators.py
-│   ├── test_memory.py
-│   ├── test_tools.py
-│   ├── test_agent.py
-│   ├── test_runner.py
-│   └── test_eval.py
-└── docs/                    # 9 篇设计文档（架构 / 引擎 / 工具 / 记忆 / ...)
+│   ├── features/               # 12 个 Gherkin feature 文件
+│   │   ├── engine.feature      # 引擎行为规格
+│   │   ├── kernel.feature      # Kernel 核心行为（5 scenarios）
+│   │   ├── kernel_tools.feature # 工具与工作区（10 scenarios）
+│   │   └── ...                 # indicators/memory/tools/agent/runner/eval/context/data/tracer/compute
+│   └── test_*.py               # 14 个 step definition 文件 + 1 E2E
+│
+├── examples/                   # 8 策略（Mock Agent + LLM Prompt）
+├── scripts/                    # trace 分析脚本
+└── docs/                       # 12 篇设计文档
 ```
+
+---
+
+## BDD 开发规范
+
+本项目强制 BDD 驱动，铁律：Feature 先行。
+
+```
+① 写 Feature 文件（Gherkin）  →  RED
+② 写 step definitions + 最小实现  →  GREEN
+③ Refactor
+```
+
+禁止在没有对应 Feature scenario 的情况下写实现代码。
+
+---
+
+## 核心模块参考
+
+### core/ — 公共基础
+
+| 模块 | 职责 |
+|------|------|
+| `sandbox.py` | exec_compute 沙箱：eval-first / 黑名单 builtins / Trading Coreutils（bbands/macd/crossover）/ SIGALRM 超时 |
+| `indicators.py` | IndicatorEngine，pandas-ta 防前瞻包装，6 指标 |
+| `tracer.py` | TraceWriter 本地 JSONL 追踪，对齐 OTel GenAI |
+
+### agenticbt/ — 回测框架
+
+| 模块 | 职责 | 设计文档 |
+|------|------|---------|
+| `engine.py` | 确定性市场模拟：多资产 / market+limit+stop+bracket 订单 / 风控 4 检查 / 部分成交 | docs/engine.md |
+| `agent.py` | LLMAgent：三层 System Prompt + ReAct loop | docs/agent-protocol.md |
+| `runner.py` | 主循环：advance → match → assemble_context → decide → record | docs/runner.md |
+| `context.py` | 五层认知上下文 + XML 格式化 + 持仓盈亏注入 + 风控约束注入 | docs/context.md |
+| `tools.py` | OpenAI function calling schema + 分发 + 调用追踪 | docs/tools.md |
+| `eval.py` | 绩效指标（sortino/calmar/cagr/max_dd_duration）+ 遵循度 | docs/eval.md |
+| `memory.py` | 文件式记忆：Workspace 隔离 + log/note/recall | docs/memory.md |
+| `data.py` | load_csv 多格式兼容 + make_sample_data（regime 多行情模式） | - |
+
+### agent/ — 持久投资助手
+
+| 模块 | 职责 | 设计文档 |
+|------|------|---------|
+| `kernel.py` | Kernel 核心：ReAct loop + wire/emit 声明式管道 + DataStore + Permission + boot 自举 | docs/tech-design.md |
+| `tools/primitives.py` | read/write/edit 通用原语，经权限检查 + emit 管道事件 | docs/tech-design.md |
+| `tools/market.py` | MarketAdapter Protocol + market.ohlcv，adapter pattern 解耦数据源 | docs/tech-design.md |
+| `tools/compute.py` | 沙箱 Python，自动从 DataStore 注入 OHLCV | docs/tech-design.md |
+| `tools/recall.py` | 全文搜索 workspace .md 文件 | docs/tech-design.md |
+| `bootstrap/seed.py` | 首次启动种子 prompt，引导 Agent 自举创建工作区 | docs/tech-design.md |
 
 ---
 
 ## 路线图
 
-| 版本 | 状态 | 亮点 |
+| 阶段 | 状态 | 亮点 |
 |------|------|------|
-| **V1 MVP** | ✅ 完成 | 单资产 · 市价单 · RSI 策略 · 38 BDD tests · mock + 真实 LLM |
-| **V2** | 计划中 | 多资产 · 限价/止损单 · 矩阵对比实验 · OpenRouter 集成 |
-| **V3** | 未来 | 指标缓存 · 向量召回记忆 · MCP 工具扩展 · Web 回测 UI |
+| agenticbt V1 | ✅ 完成 | 单资产 · 市价单 · RSI 策略 · BDD 驱动 · mock + 真实 LLM |
+| agenticbt V2 | ✅ 完成 | 多资产 · bracket/limit/stop 订单 · 风控 4 检查 · 部分成交 · 155 BDD scenarios |
+| core/ 提取 | ✅ 完成 | sandbox + indicators + tracer 共享基础 |
+| agent Phase 1 | ✅ 完成 | Kernel + 6 工具 + 权限 + 自举 + Session 持久化 · 15 BDD scenarios |
+| agent Phase 2 | 计划中 | Telegram 通道 · APScheduler 定时任务 · Skill Engine |
+| agent Phase 3 | 未来 | 成长循环（reflections → beliefs → soul 微调）· Subagent · /backtest skill |
 
 ---
 
@@ -315,6 +315,7 @@ agentic-bt/
 | `openai` | `>=1.0` | OpenAI 兼容 SDK，覆盖所有 LLM Provider |
 | `pandas` | `>=2.0` | OHLCV 数据容器 |
 | `pandas-ta` | latest | 130+ 技术指标 |
+| `tushare` | latest | A 股数据源（agent 可选） |
 | `pytest` / `pytest-bdd` | dev | BDD 测试框架 |
 
 Python 3.10+
@@ -323,4 +324,4 @@ Python 3.10+
 
 ## License
 
-MIT © 2024
+MIT

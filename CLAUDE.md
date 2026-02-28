@@ -19,7 +19,7 @@ src/
 scripts/       - 分析脚本 (trace 分析报告)
 examples/      - 策略注册表 + Mock Agent + LLM Prompt（8 策略）
 tests/
-  features/    - 10 个 Gherkin feature 文件（可执行规格说明）
+  features/    - 12 个 Gherkin feature 文件（可执行规格说明）
   test_*.py    - BDD step definitions + E2E 策略测试
 pyproject.toml - Python 包配置（venv: .venv/）
 ```
@@ -28,10 +28,10 @@ pyproject.toml - Python 包配置（venv: .venv/）
 docs/ - 完整设计文档集 (12 文件: architecture, engine, tools, compute, memory, context, eval, agent-protocol, runner, tracer, roadmap, tech-design)
 src/core/ - 公共基础包 (4 文件: __init__, sandbox, indicators, tracer)
 src/agenticbt/ - 回测框架 (13 文件: __init__, models, engine, indicators, memory, tools, sandbox, context, agent, runner, eval, data, tracer)
-src/agent/ - 持久投资助手 (3 文件: __init__, kernel, adapters/cli)
+src/agent/ - 持久投资助手 (14 文件: kernel + 4 tools + 3 adapters + 2 bootstrap + 4 __init__)
 scripts/ - 分析脚本 (1 文件: analyze_trace)
 examples/ - 策略模块 (2 文件: __init__, strategies)
-tests/ - BDD 测试 + E2E (25 文件: 11 features + 12 step definitions + 1 e2e)
+tests/ - BDD 测试 + E2E (29 文件: 12 features + 14 step definitions + 1 e2e + conftest + 1 __init__)
 </directory>
 
 ## 核心模块
@@ -60,7 +60,7 @@ tests/ - BDD 测试 + E2E (25 文件: 11 features + 12 step definitions + 1 e2e)
 # 安装
 python3.12 -m venv .venv && .venv/bin/pip install -e ".[dev]"
 
-# 全量测试（108 个 scenarios）
+# 全量测试（170 个 scenarios）
 .venv/bin/pytest tests/ -v
 
 # Mock demo（无需 API key，7 种策略）
@@ -170,7 +170,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-仿真度升级完成：BDD scenarios 全绿（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构 + P0-P1 优化：PerformanceMetrics +8 指标/recent_bars 完整 OHLCV/trade_log commission/LLM-as-Judge 设计文档 + Agent 设计重构：三层 System Prompt 架构/User Prompt XML 结构化/持仓盈亏注入/工具 Schema 优化/策略 Prompt 精简）
+仿真度升级完成：170 BDD scenarios 全绿。agenticbt 回测框架完成（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构 + Agent 设计重构）。agent 持久投资助手 Phase 1 完成（Kernel + 6 工具 + 权限 + 自举 + Session 持久化）。
 路线图：docs/roadmap.md
 
 # currentDate
