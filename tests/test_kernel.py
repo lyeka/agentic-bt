@@ -35,6 +35,15 @@ def test_wire_emit(): pass
 @scenario("features/kernel.feature", "最大轮次保护")
 def test_max_rounds(): pass
 
+@scenario("features/kernel.feature", "boot 注入 beliefs 到 system prompt")
+def test_boot_beliefs(): pass
+
+@scenario("features/kernel.feature", "boot 注入 memory index 到 system prompt")
+def test_boot_memory_index(): pass
+
+@scenario("features/kernel.feature", "boot 无 beliefs 和 memory 时只有 soul")
+def test_boot_soul_only(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -200,3 +209,49 @@ def then_echo_called(kctx, n):
 @then(parsers.parse("管道被触发 {n:d} 次"))
 def then_pipe_triggered(kctx, n):
     assert kctx.get("pipe_calls", 0) == n
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Boot 上下文注入
+# ─────────────────────────────────────────────────────────────────────────────
+
+@given(parsers.parse('工作区含 soul.md 内容 "{content}"'), target_fixture="kctx")
+def given_workspace_soul(kctx, content, tmp_path):
+    ws = tmp_path / "ws"
+    ws.mkdir()
+    (ws / "soul.md").write_text(content, encoding="utf-8")
+    kctx["workspace"] = ws
+    kctx["kernel"] = Kernel()
+    return kctx
+
+
+@given(parsers.parse('工作区含 memory/beliefs.md 内容 "{content}"'), target_fixture="kctx")
+def given_workspace_beliefs(kctx, content):
+    beliefs = kctx["workspace"] / "memory" / "beliefs.md"
+    beliefs.parent.mkdir(parents=True, exist_ok=True)
+    beliefs.write_text(content, encoding="utf-8")
+    return kctx
+
+
+@given(parsers.parse('工作区含 memory/MEMORY.md 内容 "{content}"'), target_fixture="kctx")
+def given_workspace_memory_index(kctx, content):
+    index = kctx["workspace"] / "memory" / "MEMORY.md"
+    index.parent.mkdir(parents=True, exist_ok=True)
+    index.write_text(content.replace("\\n", "\n"), encoding="utf-8")
+    return kctx
+
+
+@when("Kernel boot", target_fixture="kctx")
+def when_kernel_boot(kctx):
+    kctx["kernel"].boot(kctx["workspace"])
+    return kctx
+
+
+@then(parsers.parse('system prompt 包含 "{text}"'))
+def then_system_prompt_contains(kctx, text):
+    assert text in kctx["kernel"]._system_prompt
+
+
+@then(parsers.parse('system prompt 不包含 "{text}"'))
+def then_system_prompt_not_contains(kctx, text):
+    assert text not in kctx["kernel"]._system_prompt

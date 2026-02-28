@@ -36,7 +36,10 @@ def test_read(): pass
 @scenario(FEATURE, "edit 修改文件")
 def test_edit(): pass
 
-@scenario(FEATURE, "受保护路径写入被拒")
+@scenario(FEATURE, "受保护路径无确认回调时放行")
+def test_permission_yolo(): pass
+
+@scenario(FEATURE, "受保护路径确认拒绝时被拒")
 def test_permission_denied(): pass
 
 @scenario(FEATURE, "recall 搜索工作区")
@@ -105,6 +108,11 @@ def given_file_exists(ktctx, path, content):
 @given(parsers.parse('路径 "{path}" 权限为 USER_CONFIRM'))
 def given_permission(ktctx, path):
     ktctx["kernel"].permission(path, Permission.USER_CONFIRM)
+
+
+@given("注册了拒绝确认的回调")
+def given_deny_confirm(ktctx):
+    ktctx["kernel"].on_confirm(lambda _path: False)
 
 
 @given("一个有 4 条消息的 Session", target_fixture="ktctx")

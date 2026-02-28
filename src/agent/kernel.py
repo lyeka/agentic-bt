@@ -50,11 +50,22 @@ class Session:
 
     @classmethod
     def load(cls, path: Path) -> Session:
-        """从 JSON 恢复"""
+        """从 JSON 恢复（自动修复残缺历史）"""
         data = json.loads(path.read_text(encoding="utf-8"))
         session = cls(session_id=data["id"])
         session.history = data["history"]
+        session.repair()
         return session
+
+    def repair(self) -> None:
+        """修复残缺历史：移除末尾缺少 tool response 的 assistant 消息"""
+        if not self.history:
+            return
+        last = self.history[-1]
+        if last.get("role") != "assistant" or not last.get("tool_calls"):
+            return
+        # assistant 有 tool_calls 但后面没有 tool response → 截断
+        self.history.pop()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -112,19 +123,37 @@ class Kernel:
         self._permissions: dict[str, Permission] = {}
         self._system_prompt: str | None = None
         self._workspace: Path | None = None
+        self._confirm_handler: Callable[[str], bool] | None = None
 
     # ── 自举 ──────────────────────────────────────────────────────────────────
 
     def boot(self, workspace: Path) -> None:
-        """启动：检测 soul.md → 注入系统提示词"""
+        """启动：soul + beliefs + memory_index → 系统提示词"""
         self._workspace = workspace
         workspace.mkdir(parents=True, exist_ok=True)
+
+        parts: list[str] = []
+
+        # 灵魂（或自举种子）
         soul = workspace / "soul.md"
         if soul.exists():
-            self._system_prompt = soul.read_text(encoding="utf-8")
+            parts.append(soul.read_text(encoding="utf-8"))
         else:
             from agent.bootstrap.seed import SEED_PROMPT
-            self._system_prompt = SEED_PROMPT
+            parts.append(SEED_PROMPT)
+
+        # 信念
+        beliefs = workspace / "memory" / "beliefs.md"
+        if beliefs.exists():
+            parts.append(f"\n<beliefs>\n{beliefs.read_text(encoding='utf-8')}\n</beliefs>")
+
+        # 记忆索引（前 30 行）
+        index = workspace / "memory" / "MEMORY.md"
+        if index.exists():
+            lines = index.read_text(encoding="utf-8").split("\n")[:30]
+            parts.append(f"\n<memory_index>\n{chr(10).join(lines)}\n</memory_index>")
+
+        self._system_prompt = "\n".join(parts)
 
     # ── 工具注册 ──────────────────────────────────────────────────────────────
 
@@ -158,6 +187,16 @@ class Kernel:
             if fnmatch(path, pattern):
                 return level
         return Permission.FREE
+
+    def on_confirm(self, handler: Callable[[str], bool]) -> None:
+        """注册确认回调（CLI 弹 y/n 等）"""
+        self._confirm_handler = handler
+
+    def request_confirm(self, path: str) -> bool:
+        """请求用户确认。无 handler 时默认放行（yolo）"""
+        if self._confirm_handler is None:
+            return True
+        return self._confirm_handler(path)
 
     # ── 声明式管道 ────────────────────────────────────────────────────────────
 
@@ -207,10 +246,16 @@ class Kernel:
             # 工具调用
             if choice.message.tool_calls:
                 for tc in choice.message.tool_calls:
-                    args = json.loads(tc.function.arguments)
+                    try:
+                        args = json.loads(tc.function.arguments)
+                    except json.JSONDecodeError:
+                        args = {}
                     tool_def = self._tools.get(tc.function.name)
                     if tool_def:
-                        result = tool_def.handler(args)
+                        try:
+                            result = tool_def.handler(args)
+                        except Exception as exc:
+                            result = {"error": f"{type(exc).__name__}: {exc}"}
                         self.emit(f"tool:{tc.function.name}", {
                             "args": args, "result": result,
                         })

@@ -60,6 +60,13 @@ def main() -> None:
     kernel.permission("memory/**", Permission.FREE)
     kernel.permission("notebook/**", Permission.FREE)
 
+    # ── 4.5 确认回调 ──
+    def _cli_confirm(path: str) -> bool:
+        answer = input(f"\n确认修改 {path}? [y/n] ").strip().lower()
+        return answer in ("y", "yes")
+
+    kernel.on_confirm(_cli_confirm)
+
     # ── 5. 自举 ──
     kernel.boot(workspace)
 

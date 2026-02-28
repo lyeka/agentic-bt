@@ -34,9 +34,16 @@ Feature: Kernel 工具与工作区 — Phase 1b/1c 完整验证
     When 调用 edit path "memory/beliefs.md" old "旧信念" new "新信念"
     Then 工作区文件 "memory/beliefs.md" 内容为 "新信念"
 
-  Scenario: 受保护路径写入被拒
+  Scenario: 受保护路径无确认回调时放行
     Given 一个带文件工具的 Kernel
     And 路径 "soul.md" 权限为 USER_CONFIRM
+    When 调用 write path "soul.md" content "新灵魂"
+    Then 工作区文件 "soul.md" 内容为 "新灵魂"
+
+  Scenario: 受保护路径确认拒绝时被拒
+    Given 一个带文件工具的 Kernel
+    And 路径 "soul.md" 权限为 USER_CONFIRM
+    And 注册了拒绝确认的回调
     When 调用 write path "soul.md" content "hack"
     Then 结果包含 error
 

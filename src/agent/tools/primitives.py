@@ -24,6 +24,9 @@ def register(kernel: object, workspace: Path) -> None:
         path = workspace / rel
         if not path.exists():
             return {"error": f"文件不存在: {rel}"}
+        if path.is_dir():
+            entries = sorted(p.relative_to(workspace) for p in path.iterdir())
+            return {"entries": [str(e) for e in entries], "path": rel}
         return {"content": path.read_text(encoding="utf-8"), "path": rel}
 
     kernel.tool(
@@ -45,7 +48,7 @@ def register(kernel: object, workspace: Path) -> None:
         rel = args["path"]
         from agent.kernel import Permission
         level = kernel.check_permission(rel)
-        if level == Permission.USER_CONFIRM:
+        if level == Permission.USER_CONFIRM and not kernel.request_confirm(rel):
             return {"error": "需要用户确认", "path": rel, "permission": "user_confirm"}
 
         path = workspace / rel
@@ -74,7 +77,7 @@ def register(kernel: object, workspace: Path) -> None:
         rel = args["path"]
         from agent.kernel import Permission
         level = kernel.check_permission(rel)
-        if level == Permission.USER_CONFIRM:
+        if level == Permission.USER_CONFIRM and not kernel.request_confirm(rel):
             return {"error": "需要用户确认", "path": rel, "permission": "user_confirm"}
 
         path = workspace / rel
