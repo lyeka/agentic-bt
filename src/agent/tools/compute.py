@@ -28,7 +28,7 @@ def register(kernel: object) -> None:
         if df is None:
             df = kernel.data.get("_default_ohlcv")
         if df is None:
-            return {"error": "无 OHLCV 数据，请先调用 market.ohlcv"}
+            return {"error": "无 OHLCV 数据，请先调用 market_ohlcv"}
 
         account = kernel.data.get("account") or {
             "cash": 0, "equity": 0, "positions": {},

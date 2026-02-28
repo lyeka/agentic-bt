@@ -26,5 +26,5 @@ SEED_PROMPT = """\
 </bootstrap>
 
 <tools_hint>
-你可以使用 read/write/edit 管理工作区文件，compute 做数据分析，market.ohlcv 获取行情，recall 搜索历史。
+你可以使用 read/write/edit 管理工作区文件，compute 做数据分析，market_ohlcv 获取行情，recall 搜索历史。
 </tools_hint>"""

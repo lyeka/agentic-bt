@@ -34,7 +34,7 @@ class MarketAdapter(Protocol):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def register(kernel: object, adapter: MarketAdapter) -> None:
-    """向 Kernel 注册 market.ohlcv 工具"""
+    """向 Kernel 注册 market_ohlcv 工具"""
 
     def market_ohlcv(args: dict) -> dict:
         symbol = args["symbol"]
@@ -57,7 +57,7 @@ def register(kernel: object, adapter: MarketAdapter) -> None:
         }
 
     kernel.tool(
-        name="market.ohlcv",
+        name="market_ohlcv",
         description="获取指定标的的 OHLCV 行情数据",
         parameters={
             "type": "object",

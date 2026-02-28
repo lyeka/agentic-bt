@@ -21,7 +21,7 @@ from agent.tools import compute, market, primitives, recall
 
 FEATURE = "features/kernel_tools.feature"
 
-@scenario(FEATURE, "market.ohlcv 获取行情")
+@scenario(FEATURE, "market_ohlcv 获取行情")
 def test_market_ohlcv(): pass
 
 @scenario(FEATURE, "compute 使用行情数据计算")
@@ -92,7 +92,7 @@ def given_kernel_with_files(tmp_path):
 
 @given(parsers.parse('已获取 "{symbol}" 行情'))
 def given_fetched(ktctx, symbol):
-    ktctx["kernel"]._tools["market.ohlcv"].handler({"symbol": symbol})
+    ktctx["kernel"]._tools["market_ohlcv"].handler({"symbol": symbol})
 
 
 @given(parsers.parse('工作区已有文件 "{path}" 内容 "{content}"'))
@@ -138,9 +138,9 @@ def given_soul_workspace(tmp_path, content):
 # When
 # ─────────────────────────────────────────────────────────────────────────────
 
-@when(parsers.parse('调用 market.ohlcv symbol "{symbol}"'), target_fixture="ktctx")
+@when(parsers.parse('调用 market_ohlcv symbol "{symbol}"'), target_fixture="ktctx")
 def when_market(ktctx, symbol):
-    ktctx["result"] = ktctx["kernel"]._tools["market.ohlcv"].handler({"symbol": symbol})
+    ktctx["result"] = ktctx["kernel"]._tools["market_ohlcv"].handler({"symbol": symbol})
     return ktctx
 
 

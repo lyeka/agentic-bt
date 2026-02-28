@@ -1,11 +1,11 @@
 Feature: Kernel 工具与工作区 — Phase 1b/1c 完整验证
-  6 个工具（market.ohlcv/compute/read/write/edit/recall）+ 权限 + Session 持久化 + 自举。
+  6 个工具（market_ohlcv/compute/read/write/edit/recall）+ 权限 + Session 持久化 + 自举。
 
   # ── Phase 1b: 能看能算 ──
 
-  Scenario: market.ohlcv 获取行情
+  Scenario: market_ohlcv 获取行情
     Given 一个带市场工具的 Kernel
-    When 调用 market.ohlcv symbol "TEST"
+    When 调用 market_ohlcv symbol "TEST"
     Then 结果包含 rows 和 latest
     And DataStore 中存在 "ohlcv:TEST"
 
