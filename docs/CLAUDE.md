@@ -17,5 +17,6 @@ agent-protocol.md: AgentProtocol 接口规范，Decision 数据结构，多种 A
 runner.md: 回测编排器，主循环流程，触发策略，框架驱动记忆时刻，矩阵实验
 tracer.md: Agent 可观测性，trace.jsonl 格式定义，对齐 OTel GenAI Semantic Conventions，观测点注入
 roadmap.md: 开发路线图，MVP 范围定义，V2/V3/V4 演进规划
+tech-design.md: 技术架构设计 V3，自建内核/Pi 工具哲学（6 工具）/Kernel-centric/声明式管道/自举/core 提取
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
