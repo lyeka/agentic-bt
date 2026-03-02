@@ -1,6 +1,6 @@
 """
 [INPUT]: openai, json, pathlib, enum
-[OUTPUT]: Kernel — 核心协调器；Session — 会话容器；DataStore — 数据注册表；Permission — 文件权限级别
+[OUTPUT]: Kernel — 核心协调器；Session — 会话容器；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE
 [POS]: agent 包核心，系统唯一协调中心：ReAct loop + 声明式 wire/emit + DataStore + 权限 + 自举
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -13,9 +13,41 @@ from dataclasses import dataclass
 from enum import Enum
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Protocol
 
 import openai
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 常量
+# ─────────────────────────────────────────────────────────────────────────────
+
+MEMORY_MAX_CHARS = 100_000
+
+WORKSPACE_GUIDE = """\
+<workspace>
+你的工作区有三个区域，各有不同的用途和修改门槛：
+
+soul.md — 你的身份与核心信念。定义你是谁、你相信什么、你的行事原则。
+  修改门槛：极高。只在认知发生根本性转变时修改。需要用户确认。
+
+memory.md — 你的长期记忆。记录重要发现、用户偏好、市场观察、经验教训。
+  格式：newest-first 倒排，最新条目写在文件顶部。
+  读取：用 read 查看最近记忆，用 bash grep 检索特定主题。
+  容量：有上限，超限时系统会自动压缩旧记忆。
+
+notebook/ — 你的工作台。研究报告、分析草稿、临时笔记。
+  自由使用，无容量限制。适合阶段性产出和探索性工作。
+</workspace>"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# MemoryCompressor Protocol
+# ─────────────────────────────────────────────────────────────────────────────
+
+class MemoryCompressor(Protocol):
+    """记忆压缩策略接口。这一版: LLM。未来: embeddings/rules/etc."""
+    def compress(self, content: str, limit: int) -> str: ...
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -128,32 +160,20 @@ class Kernel:
     # ── 自举 ──────────────────────────────────────────────────────────────────
 
     def boot(self, workspace: Path) -> None:
-        """启动：soul + beliefs + memory_index → 系统提示词"""
+        """启动：soul + workspace 使用指南 → 系统提示词"""
         self._workspace = workspace
         workspace.mkdir(parents=True, exist_ok=True)
+        self._assemble_system_prompt()
 
-        parts: list[str] = []
-
-        # 灵魂（或自举种子）
-        soul = workspace / "soul.md"
+    def _assemble_system_prompt(self) -> None:
+        """soul.md + WORKSPACE_GUIDE → 系统提示词。Memory 内容不进入。"""
+        soul = self._workspace / "soul.md"
         if soul.exists():
-            parts.append(soul.read_text(encoding="utf-8"))
+            identity = soul.read_text(encoding="utf-8")
+            self._system_prompt = f"{identity}\n\n{WORKSPACE_GUIDE}"
         else:
             from agent.bootstrap.seed import SEED_PROMPT
-            parts.append(SEED_PROMPT)
-
-        # 信念
-        beliefs = workspace / "memory" / "beliefs.md"
-        if beliefs.exists():
-            parts.append(f"\n<beliefs>\n{beliefs.read_text(encoding='utf-8')}\n</beliefs>")
-
-        # 记忆索引（前 30 行）
-        index = workspace / "memory" / "MEMORY.md"
-        if index.exists():
-            lines = index.read_text(encoding="utf-8").split("\n")[:30]
-            parts.append(f"\n<memory_index>\n{chr(10).join(lines)}\n</memory_index>")
-
-        self._system_prompt = "\n".join(parts)
+            self._system_prompt = SEED_PROMPT
 
     # ── 工具注册 ──────────────────────────────────────────────────────────────
 

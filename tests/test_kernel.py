@@ -1,7 +1,7 @@
 """
 [INPUT]: pytest-bdd, agent.kernel, unittest.mock
 [OUTPUT]: kernel.feature step definitions（Mock LLM）
-[POS]: tests/ BDD 测试层，验证 Kernel ReAct loop / wire·emit / Session
+[POS]: tests/ BDD 测试层，验证 Kernel ReAct loop / wire·emit / Session / boot / soul 刷新
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 from pytest_bdd import given, parsers, scenario, then, when
 
-from agent.kernel import Kernel, Session
+from agent.kernel import Kernel, Session, WORKSPACE_GUIDE
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -35,14 +35,17 @@ def test_wire_emit(): pass
 @scenario("features/kernel.feature", "最大轮次保护")
 def test_max_rounds(): pass
 
-@scenario("features/kernel.feature", "boot 注入 beliefs 到 system prompt")
-def test_boot_beliefs(): pass
-
-@scenario("features/kernel.feature", "boot 注入 memory index 到 system prompt")
-def test_boot_memory_index(): pass
-
-@scenario("features/kernel.feature", "boot 无 beliefs 和 memory 时只有 soul")
+@scenario("features/kernel.feature", "boot 只有 soul 和 workspace 指南")
 def test_boot_soul_only(): pass
+
+@scenario("features/kernel.feature", "soul 变更后 system prompt 自动刷新")
+def test_soul_refresh(): pass
+
+@scenario("features/kernel.feature", "system prompt 包含 workspace 使用指南")
+def test_workspace_guide(): pass
+
+@scenario("features/kernel.feature", "system prompt 不包含 memory 文件内容")
+def test_memory_not_in_prompt(): pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -225,25 +228,28 @@ def given_workspace_soul(kctx, content, tmp_path):
     return kctx
 
 
-@given(parsers.parse('工作区含 memory/beliefs.md 内容 "{content}"'), target_fixture="kctx")
-def given_workspace_beliefs(kctx, content):
-    beliefs = kctx["workspace"] / "memory" / "beliefs.md"
-    beliefs.parent.mkdir(parents=True, exist_ok=True)
-    beliefs.write_text(content, encoding="utf-8")
-    return kctx
-
-
-@given(parsers.parse('工作区含 memory/MEMORY.md 内容 "{content}"'), target_fixture="kctx")
-def given_workspace_memory_index(kctx, content):
-    index = kctx["workspace"] / "memory" / "MEMORY.md"
-    index.parent.mkdir(parents=True, exist_ok=True)
-    index.write_text(content.replace("\\n", "\n"), encoding="utf-8")
+@given(parsers.parse('工作区含 memory.md 内容 "{content}"'), target_fixture="kctx")
+def given_workspace_memory(kctx, content):
+    mem = kctx["workspace"] / "memory.md"
+    mem.write_text(content, encoding="utf-8")
     return kctx
 
 
 @when("Kernel boot", target_fixture="kctx")
 def when_kernel_boot(kctx):
     kctx["kernel"].boot(kctx["workspace"])
+    return kctx
+
+
+@when(parsers.parse('修改 soul.md 为 "{content}"'), target_fixture="kctx")
+def when_update_soul(kctx, content):
+    (kctx["workspace"] / "soul.md").write_text(content, encoding="utf-8")
+    return kctx
+
+
+@when("重新组装 system prompt", target_fixture="kctx")
+def when_reassemble_prompt(kctx):
+    kctx["kernel"]._assemble_system_prompt()
     return kctx
 
 

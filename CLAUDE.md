@@ -15,11 +15,11 @@ docs/          - 设计文档 (11 篇，agent-design.md 是 Agent 唯一活文�
 src/
   core/        - 公共基础包 (4 文件: sandbox/indicators/tracer)
   agenticbt/   - 回测框架 (13 文件，import core/)
-  agent/       - 持久投资助手 (Phase 1 完成: Kernel + 7 工具 + 权限 + 自举 + 路径安全)
+  agent/       - 持久投资助手 (Phase 1 完成: Kernel + 6 工具 + 权限 + 自举 + soul 刷新 + memory 压缩)
 scripts/       - 分析脚本 (trace 分析报告)
 examples/      - 策略注册表 + Mock Agent + LLM Prompt（8 策略）
 tests/
-  features/    - 14 个 Gherkin feature 文件（可执行规格说明）
+  features/    - 15 个 Gherkin feature 文件（可执行规格说明）
   test_*.py    - BDD step definitions + E2E 策略测试
 pyproject.toml - Python 包配置（venv: .venv/）
 ```
@@ -28,10 +28,10 @@ pyproject.toml - Python 包配置（venv: .venv/）
 docs/ - 完整设计文档集 (11 文件: agent-design, architecture, engine, tools, compute, memory, context, eval, agent-protocol, runner, tracer, roadmap)
 src/core/ - 公共基础包 (4 文件: __init__, sandbox, indicators, tracer)
 src/agenticbt/ - 回测框架 (13 文件: __init__, models, engine, indicators, memory, tools, sandbox, context, agent, runner, eval, data, tracer)
-src/agent/ - 持久投资助手 (21 文件: kernel + 8 tools + _path + _truncate + 4 adapters + 2 bootstrap + 4 __init__)
+src/agent/ - 持久投资助手 (20 文件: kernel + 7 tools + _path + _truncate + 4 adapters + 2 bootstrap + 4 __init__)
 scripts/ - 分析脚本 (1 文件: analyze_trace)
 examples/ - 策略模块 (2 文件: __init__, strategies)
-tests/ - BDD 测试 + E2E (31 文件: 13 features + 15 step definitions + 1 e2e + conftest + 1 __init__)
+tests/ - BDD 测试 + E2E (33 文件: 15 features + 17 step definitions + 1 e2e + conftest + 1 __init__)
 </directory>
 
 ## 核心模块
@@ -170,7 +170,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-仿真度升级完成：197 BDD scenarios 全绿。agenticbt 回测框架完成（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构 + Agent 设计重构）。agent 持久投资助手 Phase 1 完成（Kernel + 7 工具 + 权限 + 自举 + Session 持久化 + 工具系统升级：截断治理/模糊匹配/路径安全/bash）。CLI MVP 完成（TushareAdapter + dotenv + 完整 boot 流程）。
+仿真度升级完成：200 BDD scenarios 全绿。agenticbt 回测框架完成（Phase 1-7 + 上下文工程重构 + 可观测性追踪 + E2E 策略多样化 + compute 沙箱重构 + Agent 设计重构）。agent 持久投资助手 Phase 1 完成（Kernel + 6 工具 + 权限 + 自举 + Session 持久化 + 工具系统升级）。Soul + Memory 机制重构完成（soul 实时刷新 + memory.md 单文件 100KB 倒排 + LLM 自动压缩 + recall 移除 + workspace 元认知指南）。CLI MVP 完成（TushareAdapter + dotenv + 完整 boot 流程）。
 路线图：docs/roadmap.md
 
 # currentDate

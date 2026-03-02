@@ -12,7 +12,7 @@ from pytest_bdd import given, parsers, scenario, then, when
 
 from agent.kernel import Kernel, Permission, Session
 from agent.adapters.market.csv import CsvAdapter
-from agent.tools import compute, edit, market, read, recall, write
+from agent.tools import compute, edit, market, read, write
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -41,9 +41,6 @@ def test_permission_yolo(): pass
 
 @scenario(FEATURE, "受保护路径确认拒绝时被拒")
 def test_permission_denied(): pass
-
-@scenario(FEATURE, "recall 搜索工作区")
-def test_recall(): pass
 
 @scenario(FEATURE, "Session 保存与恢复")
 def test_session_persistence(): pass
@@ -91,7 +88,6 @@ def given_kernel_with_files(tmp_path):
     read.register(kernel, workspace, cwd=workspace)
     write.register(kernel, workspace, cwd=workspace)
     edit.register(kernel, workspace, cwd=workspace)
-    recall.register(kernel, workspace)
     return {"kernel": kernel, "workspace": workspace}
 
 
@@ -182,12 +178,6 @@ def when_edit(ktctx, path, old, new):
     return ktctx
 
 
-@when(parsers.parse('调用 recall query "{query}"'), target_fixture="ktctx")
-def when_recall(ktctx, query):
-    ktctx["result"] = ktctx["kernel"]._tools["recall"].handler({"query": query})
-    return ktctx
-
-
 @when("保存并重新加载 Session", target_fixture="ktctx")
 def when_save_load(ktctx):
     path = ktctx["tmp_path"] / "session.json"
@@ -240,12 +230,6 @@ def then_result_content(ktctx, content):
 @then("结果包含 error")
 def then_has_error(ktctx):
     assert "error" in ktctx["result"]
-
-
-@then(parsers.parse('结果中包含路径 "{path}"'))
-def then_result_path(ktctx, path):
-    paths = [r["path"] for r in ktctx["result"]["results"]]
-    assert path in paths
 
 
 @then("恢复后历史有 4 条消息")

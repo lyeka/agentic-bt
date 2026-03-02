@@ -1,6 +1,6 @@
 """
 [INPUT]: dotenv, json, agent.kernel, agent.tools.*, agent.adapters.market.tushare
-[OUTPUT]: main — 完整 CLI 入口（boot + 7 工具 + 权限 + Session 持久化 + JSONL trace）
+[OUTPUT]: main — 完整 CLI 入口（boot + 6 工具 + 权限 + Session 持久化 + JSONL trace + memory 压缩）
 [POS]: 用户交互通道，驱动完整 Kernel 生命周期
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -15,9 +15,35 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from agent.kernel import Kernel, Permission, Session
+from agent.kernel import Kernel, MemoryCompressor, MEMORY_MAX_CHARS, Permission, Session
 from agent.adapters.market.tushare import TushareAdapter
-from agent.tools import bash, compute, edit, market, read, recall, write
+from agent.tools import bash, compute, edit, market, read, write
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Memory 压缩策略
+# ─────────────────────────────────────────────────────────────────────────────
+
+class LLMCompressor:
+    """这一版压缩策略：用 LLM 做记忆整合"""
+
+    def __init__(self, client: object, model: str) -> None:
+        self.client = client
+        self.model = model
+
+    def compress(self, content: str, limit: int) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": (
+                    f"你是记忆压缩器。将以下记忆精简到{limit}字以内。"
+                    "保持 newest-first 倒排结构。保留最新和最重要的条目。"
+                    "合并相近主题的旧条目，丢弃过时的细节。保持 markdown 格式。"
+                )},
+                {"role": "user", "content": content},
+            ],
+        )
+        return response.choices[0].message.content or content[:limit]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -47,7 +73,7 @@ def main() -> None:
     # ── 2. 创建 Kernel ──
     kernel = Kernel(model=model, base_url=base_url, api_key=api_key)
 
-    # ── 3. 注册 7 工具 ──
+    # ── 3. 注册 6 工具 ──
     cwd = Path.cwd()
     if tushare_token:
         adapter = TushareAdapter(token=tushare_token)
@@ -56,12 +82,11 @@ def main() -> None:
     read.register(kernel, workspace, cwd)
     write.register(kernel, workspace, cwd)
     edit.register(kernel, workspace, cwd)
-    recall.register(kernel, workspace)
     bash.register(kernel, cwd=cwd)
 
     # ── 4. 声明权限 ──
     kernel.permission("soul.md", Permission.USER_CONFIRM)
-    kernel.permission("memory/**", Permission.FREE)
+    kernel.permission("memory.md", Permission.FREE)
     kernel.permission("notebook/**", Permission.FREE)
     kernel.permission("__external__", Permission.USER_CONFIRM)
 
@@ -79,7 +104,15 @@ def main() -> None:
     trace_path = workspace / "trace.jsonl"
     _wire_trace(kernel, trace_path)
 
-    # ── 7. Session 持久化 ──
+    # ── 7. Wire: Soul 刷新 + Memory 压缩 ──
+    compressor = LLMCompressor(kernel.client, kernel.model)
+
+    kernel.wire("write:soul.md", lambda e, d: kernel._assemble_system_prompt())
+    kernel.wire("edit:soul.md", lambda e, d: kernel._assemble_system_prompt())
+    kernel.wire("write:memory.md", lambda e, d: _on_memory_write(kernel, workspace, compressor))
+    kernel.wire("edit:memory.md", lambda e, d: _on_memory_write(kernel, workspace, compressor))
+
+    # ── 8. Session 持久化 ──
     session_path = workspace / ".session.json"
     if session_path.exists():
         session = Session.load(session_path)
@@ -87,7 +120,7 @@ def main() -> None:
     else:
         session = Session(session_id="cli")
 
-    # ── 8. REPL ──
+    # ── 9. REPL ──
     print(f"投资助手已启动 | 模型: {model} | trace → {trace_path}")
     print("输入 quit 退出")
     try:
@@ -95,6 +128,22 @@ def main() -> None:
     finally:
         session.save(session_path)
         print(f"会话已保存 → {session_path}")
+
+
+def _on_memory_write(kernel: Kernel, workspace: Path, compressor: LLMCompressor) -> None:
+    """memory.md 超限时自动压缩"""
+    mem = workspace / "memory.md"
+    if not mem.exists():
+        return
+    content = mem.read_text(encoding="utf-8")
+    if len(content) <= MEMORY_MAX_CHARS:
+        return
+    compressed = compressor.compress(content, MEMORY_MAX_CHARS)
+    mem.write_text(compressed, encoding="utf-8")
+    kernel.emit("memory.compressed", {
+        "original_chars": len(content),
+        "compressed_chars": len(compressed),
+    })
 
 
 def _wire_trace(kernel: Kernel, trace_path: Path) -> None:

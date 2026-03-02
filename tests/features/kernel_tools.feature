@@ -1,5 +1,5 @@
 Feature: Kernel 工具与工作区 — Phase 1b/1c 完整验证
-  6 个工具（market_ohlcv/compute/read/write/edit/recall）+ 权限 + Session 持久化 + 自举。
+  6 个工具（market_ohlcv/compute/read/write/edit/bash）+ 权限 + Session 持久化 + 自举。
 
   # ── Phase 1b: 能看能算 ──
 
@@ -30,9 +30,9 @@ Feature: Kernel 工具与工作区 — Phase 1b/1c 完整验证
 
   Scenario: edit 修改文件
     Given 一个带文件工具的 Kernel
-    And 工作区已有文件 "memory/beliefs.md" 内容 "旧信念"
-    When 调用 edit path "memory/beliefs.md" old "旧信念" new "新信念"
-    Then 工作区文件 "memory/beliefs.md" 内容为 "新信念"
+    And 工作区已有文件 "notebook/draft.md" 内容 "旧内容"
+    When 调用 edit path "notebook/draft.md" old "旧内容" new "新内容"
+    Then 工作区文件 "notebook/draft.md" 内容为 "新内容"
 
   Scenario: 受保护路径无确认回调时放行
     Given 一个带文件工具的 Kernel
@@ -46,12 +46,6 @@ Feature: Kernel 工具与工作区 — Phase 1b/1c 完整验证
     And 注册了拒绝确认的回调
     When 调用 write path "soul.md" content "hack"
     Then 结果包含 error
-
-  Scenario: recall 搜索工作区
-    Given 一个带文件工具的 Kernel
-    And 工作区已有文件 "notebook/report.md" 内容 "宁德时代年度分析"
-    When 调用 recall query "宁德时代"
-    Then 结果中包含路径 "notebook/report.md"
 
   Scenario: Session 保存与恢复
     Given 一个有 4 条消息的 Session

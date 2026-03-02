@@ -26,9 +26,11 @@
 `test_tracer.py`: tracer.feature step definitions（fixture: trcx）
 `test_compute.py`: compute.feature step definitions（fixture: cptx）
 `test_e2e_strategies.py`: E2E 策略自动化测试（参数化 5 mock + 2 LLM-only 验证）
-`features/kernel.feature`: Kernel 核心协调器行为规格（5 scenarios：对话/历史/ReAct/管道/最大轮次）
+`features/kernel.feature`: Kernel 核心协调器行为规格（9 scenarios：对话/历史/ReAct/管道/最大轮次/boot soul+workspace指南/soul刷新/workspace指南/memory不进prompt）
+`features/memory_compress.feature`: Memory 自动压缩行为规格（3 scenarios：超限触发/未超限/markdown格式）
 `test_kernel.py`: kernel.feature step definitions（fixture: kctx，Mock LLM）
-`features/kernel_tools.feature`: Kernel 工具与工作区行为规格（10 scenarios：market/compute/read/write/edit/权限/recall/Session 持久化/自举）
+`test_memory_compress.py`: memory_compress.feature step definitions（fixture: mcctx，mock LLM 压缩）
+`features/kernel_tools.feature`: Kernel 工具与工作区行为规格（9 scenarios：market/compute/read/write/edit/权限/Session 持久化/自举；recall 已移除）
 `test_kernel_tools.py`: kernel_tools.feature step definitions（fixture: ktctx，直接调用 handler）
 `features/tushare_adapter.feature`: TushareAdapter 行为规格（5 scenarios：列名标准化/日期类型/排序/日期范围透传/默认范围）
 `test_tushare_adapter.py`: tushare_adapter.feature step definitions（fixture: tsctx，mock tushare API）

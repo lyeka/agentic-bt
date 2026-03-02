@@ -7,7 +7,7 @@
 
 ## 成员清单
 `__init__.py`: 包入口
-`kernel.py`: Kernel 核心协调器（ReAct loop + wire/emit 声明式管道 + DataStore + Permission 权限 + boot 自举）；Session 会话容器（持久化 save/load）；DataStore 数据注册表；Permission 枚举
+`kernel.py`: Kernel 核心协调器（ReAct loop + wire/emit 声明式管道 + DataStore + Permission 权限 + boot 自举 + _assemble_system_prompt soul 刷新）；Session 会话容器（持久化 save/load）；DataStore 数据注册表；Permission 枚举；MemoryCompressor Protocol；MEMORY_MAX_CHARS = 100_000；WORKSPACE_GUIDE 元认知框架
 
 ### tools/
 `__init__.py`: 工具包入口
@@ -18,12 +18,11 @@
 `edit.py`: edit 工具 — 精确文本替换（模糊匹配+唯一性检查+diff 输出）
 `market.py`: MarketAdapter Protocol + market.ohlcv 工具注册，adapter pattern 解耦数据源
 `compute.py`: 沙箱 Python 计算，自动从 DataStore 注入 OHLCV
-`recall.py`: 全文搜索 workspace .md 文件，返回匹配段落
 `bash.py`: shell 命令执行；subprocess + 超时 + 进程树清理（os.killpg）+ tail 截断；USER_CONFIRM 权限
 
 ### adapters/
 `__init__.py`: 适配器层入口
-`cli.py`: CLI REPL 完整入口（dotenv + boot + 7 工具注册 + 权限 + Session 持久化）
+`cli.py`: CLI REPL 完整入口（dotenv + boot + 6 工具注册 + 权限 + Session 持久化 + LLMCompressor + soul 刷新 wire + memory 压缩 wire）
 
 ### adapters/market/
 `__init__.py`: 市场数据适配器入口
