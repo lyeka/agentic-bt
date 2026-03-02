@@ -56,6 +56,7 @@ Feature: Kernel 工具与工作区 — Phase 1b/1c 完整验证
     Given 一个空工作区
     When Kernel 启动
     Then system_prompt 包含自举种子
+    And system_prompt 包含 "<workspace>"
 
   Scenario: soul.md 存在时注入灵魂
     Given 一个含 soul.md 的工作区 内容为 "我是价值投资者"

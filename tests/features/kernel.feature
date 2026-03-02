@@ -64,3 +64,8 @@ Feature: Kernel — 持久投资助手核心协调器
     When Kernel boot
     Then system prompt 不包含 "秘密记忆数据123"
     And system prompt 包含 "<workspace>"
+
+  Scenario: turn 在 user 消息中注入当前日期
+    Given 一个 Kernel
+    When 用户说 "今天涨了吗"
+    Then Session 历史中用户消息包含日期前缀

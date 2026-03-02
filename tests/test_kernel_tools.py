@@ -241,7 +241,7 @@ def then_restored_4(ktctx):
 @then("system_prompt 包含自举种子")
 def then_has_seed(ktctx):
     from agent.bootstrap.seed import SEED_PROMPT
-    assert ktctx["kernel"]._system_prompt == SEED_PROMPT
+    assert SEED_PROMPT in ktctx["kernel"]._system_prompt
 
 
 @then(parsers.parse('system_prompt 包含 "{text}"'))

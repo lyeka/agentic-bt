@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 from collections import defaultdict
+from datetime import datetime
 from dataclasses import dataclass
 from enum import Enum
 from fnmatch import fnmatch
@@ -28,10 +29,14 @@ WORKSPACE_GUIDE = """\
 <workspace>
 你的工作区有三个区域，各有不同的用途和修改门槛：
 
-soul.md — 你的身份与核心信念。定义你是谁、你相信什么、你的行事原则。
+soul.md — 你自己的人格。描述你这个 agent 是谁，用第一人称。
+  ✅ 写入："我相信..."、"我的分析方法是..."、"我的行事原则是..."
+  ❌ 不写："服务对象是..."、"用户喜欢..."（那是关于用户的，不是你的人格）
   修改门槛：极高。只在认知发生根本性转变时修改。需要用户确认。
 
-memory.md — 你的长期记忆。记录重要发现、用户偏好、市场观察、经验教训。
+memory.md — 你关于用户和世界的记忆。描述你知道的外部信息。
+  ✅ 写入：用户称呼、用户投资偏好、关注标的、市场观察、研究结论
+  ❌ 不写：你自己的信念或方法论（那是 soul 的内容）
   格式：newest-first 倒排，最新条目写在文件顶部。
   读取：用 read 查看最近记忆，用 bash grep 检索特定主题。
   容量：有上限，超限时系统会自动压缩旧记忆。
@@ -170,10 +175,10 @@ class Kernel:
         soul = self._workspace / "soul.md"
         if soul.exists():
             identity = soul.read_text(encoding="utf-8")
-            self._system_prompt = f"{identity}\n\n{WORKSPACE_GUIDE}"
         else:
             from agent.bootstrap.seed import SEED_PROMPT
-            self._system_prompt = SEED_PROMPT
+            identity = SEED_PROMPT
+        self._system_prompt = f"{identity}\n\n{WORKSPACE_GUIDE}"
 
     # ── 工具注册 ──────────────────────────────────────────────────────────────
 
@@ -235,8 +240,10 @@ class Kernel:
 
     def turn(self, user_input: str, session: Session) -> str:
         """核心：接收用户输入 → ReAct loop → 返回回复"""
+        today = datetime.now().strftime("%Y-%m-%d")
         self.emit("turn.start", {"input": user_input})
-        session.history.append({"role": "user", "content": user_input})
+        dated_input = f"[{today}]\n{user_input}"
+        session.history.append({"role": "user", "content": dated_input})
 
         tool_schemas = [t.schema for t in self._tools.values()] or None
         prefix = (

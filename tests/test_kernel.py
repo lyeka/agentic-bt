@@ -47,6 +47,9 @@ def test_workspace_guide(): pass
 @scenario("features/kernel.feature", "system prompt 不包含 memory 文件内容")
 def test_memory_not_in_prompt(): pass
 
+@scenario("features/kernel.feature", "turn 在 user 消息中注入当前日期")
+def test_turn_date_injection(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -261,3 +264,10 @@ def then_system_prompt_contains(kctx, text):
 @then(parsers.parse('system prompt 不包含 "{text}"'))
 def then_system_prompt_not_contains(kctx, text):
     assert text not in kctx["kernel"]._system_prompt
+
+
+@then("Session 历史中用户消息包含日期前缀")
+def then_user_message_has_date(kctx):
+    import re
+    user_msg = kctx["session"].history[0]["content"]
+    assert re.match(r"\[\d{4}-\d{2}-\d{2}\]\n", user_msg)
