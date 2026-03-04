@@ -41,5 +41,7 @@
 `features/im_driver.feature`: IM 通用驱动行为规格（5 scenarios：鉴权/进度状态/确认交互/会话持久化/默认隐藏过程消息）
 `test_im_driver.py`: im_driver.feature step definitions（fixture: imctx，FakeBackend + FakeKernel + bundle_factory）
 `test_telegram_adapter.py`: Telegram 适配器 helper 单测（allowlist/bool/render_mode 解析 + markdown->HTML 渲染）
+`features/web_tools.feature`: Web 工具行为规格（9 scenarios：web_search 结构化结果/域名过滤/上限/失败；web_fetch 内容/截断/无效URL/网络错误；条件注册）
+`test_web_tools.py`: web_tools.feature step definitions（fixture: wctx，MockSearchAdapter + patch _fetch_url）
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

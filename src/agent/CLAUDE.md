@@ -22,6 +22,7 @@
 `market.py`: MarketAdapter Protocol + market.ohlcv 工具注册，adapter pattern 解耦数据源
 `compute.py`: 沙箱 Python 计算，自动从 DataStore 注入 OHLCV
 `bash.py`: shell 命令执行；subprocess + 超时 + 进程树清理（os.killpg）+ tail 截断；USER_CONFIRM 权限
+`web.py`: SearchAdapter Protocol + web_search/web_fetch 工具注册；Jina Reader 优先 + stdlib fallback；fetch 始终注册，search 按 adapter 条件注册
 
 ### adapters/
 `__init__.py`: 适配器层入口
@@ -39,6 +40,10 @@
 `__init__.py`: 市场数据适配器入口
 `csv.py`: CsvAdapter — 基于 DataFrame dict 的测试用 MarketAdapter
 `tushare.py`: TushareAdapter — A 股日线 OHLCV，tushare Pro API
+
+### adapters/web/
+`__init__.py`: web 搜索适配器包入口
+`tavily.py`: TavilyAdapter — Tavily Search API（agent-native，返回 {title, url, snippet, score}）
 
 ### bootstrap/
 `__init__.py`: 自举包入口
