@@ -4,7 +4,7 @@
 > 仿生学设计 · 有灵魂 · 有记忆 · 能看行情 · 能计算 · 能成长
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![BDD Tests](https://img.shields.io/badge/BDD%20tests-190%20scenarios-brightgreen)
+![BDD Tests](https://img.shields.io/badge/tests-211%20passed-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -67,6 +67,26 @@ python -m agent.adapters.cli
 
 首次启动时工作区为空，Agent 通过种子对话了解你的投资风格，然后用 `write` 工具自己创建 `soul.md` 和 `memory.md`。之后每次启动自动加载身份与记忆。
 
+### Telegram Bot（Polling）
+
+```bash
+# 1) 安装 Telegram 依赖
+.venv/bin/pip install -e ".[telegram]"
+
+# 2) 配置 .env（最少需要这三项）
+# API_KEY=...
+# TELEGRAM_BOT_TOKEN=...
+# TELEGRAM_ALLOWED_USER_IDS=123456789
+
+# 3) 启动
+python -m agent.adapters.telegram
+```
+
+说明：
+- `WORKSPACE`（默认 `~/.agent/workspace`）用于 `soul.md/memory.md/notebook/`
+- `STATE_DIR`（默认 `~/.agent/state`）用于 session/trace 等运行状态
+- 默认 owner-only（`TELEGRAM_ALLOWED_USER_IDS`），未配置时只回显你的 `user_id` 并拒绝执行
+
 ### 回测框架 Demo
 
 ```bash
@@ -83,7 +103,7 @@ OPENAI_API_KEY=sk-... python demo.py --provider openai --csv your_data.csv
 ### 运行测试
 
 ```bash
-.venv/bin/pytest tests/ -v                 # 全量 BDD（~190 scenarios）
+.venv/bin/pytest tests/ -v                 # 全量测试
 .venv/bin/pytest tests/test_kernel.py -v   # 单模块
 .venv/bin/pytest tests/ -k "market"        # 按关键词
 ```

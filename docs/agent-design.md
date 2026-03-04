@@ -676,8 +676,8 @@ Agent 输出任务设计稿：
 | CLI adapter | ✅ | 完整生命周期 |
 | TushareAdapter | ✅ | A 股日线 OHLCV |
 | CsvAdapter | ✅ | 测试用 |
-| Telegram adapter | ❌ | |
-| Adapter 公共 Setup | ❌ | 工具注册/权限/管道逻辑提取 |
+| Telegram adapter | ✅ | polling + allowlist + IMDriver（channel-agnostic） |
+| Adapter 公共 Setup | ✅ | runtime.py 统一工具注册/权限/管道/trace/session 组装 |
 
 ### 高级能力
 

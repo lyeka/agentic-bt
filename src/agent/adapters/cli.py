@@ -1,49 +1,21 @@
 """
-[INPUT]: dotenv, json, agent.kernel, agent.tools.*, agent.adapters.market.tushare
-[OUTPUT]: main — 完整 CLI 入口（boot + 6 工具 + 权限 + Session 持久化 + JSONL trace + memory 压缩）
-[POS]: 用户交互通道，驱动完整 Kernel 生命周期
+[INPUT]: dotenv, agent.runtime
+[OUTPUT]: main — CLI 入口（使用 runtime 统一组装 Kernel；Session 落盘到 state_dir）
+[POS]: 用户交互通道（CLI），尽量薄；业务组装逻辑下沉到 runtime
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
-from __future__ import annotations
-
-import json
 import os
 import sys
-from datetime import datetime, timezone
+from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 from dotenv import load_dotenv
 
-from agent.kernel import Kernel, MemoryCompressor, MEMORY_MAX_CHARS, Permission, Session
-from agent.adapters.market.tushare import TushareAdapter
-from agent.tools import bash, compute, edit, market, read, write
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Memory 压缩策略
-# ─────────────────────────────────────────────────────────────────────────────
-
-class LLMCompressor:
-    """这一版压缩策略：用 LLM 做记忆整合"""
-
-    def __init__(self, client: object, model: str) -> None:
-        self.client = client
-        self.model = model
-
-    def compress(self, content: str, limit: int) -> str:
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": (
-                    f"你是记忆压缩器。将以下记忆精简到{limit}字以内。"
-                    "保持 newest-first 倒排结构。保留最新和最重要的条目。"
-                    "合并相近主题的旧条目，丢弃过时的细节。保持 markdown 格式。"
-                )},
-                {"role": "user", "content": content},
-            ],
-        )
-        return response.choices[0].message.content or content[:limit]
+from agent.kernel import Session
+from agent.runtime import AgentConfig, build_kernel_bundle
+from agent.session_store import SessionStore
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,117 +28,62 @@ def main() -> None:
     # ── 1. 加载环境变量 ──
     load_dotenv()
 
-    model = os.getenv("MODEL", "gpt-4o-mini")
-    base_url = os.getenv("BASE_URL") or None
-    api_key = os.getenv("API_KEY")
-    tushare_token = os.getenv("TUSHARE_TOKEN")
-    workspace = Path(
-        os.getenv("WORKSPACE", "~/.agent/workspace")
-    ).expanduser()
-
-    if not api_key:
+    config = AgentConfig.from_env()
+    # 兼容：CLI 历史行为默认启用 bash；IM 入口仍默认关闭。
+    raw_enable_bash = os.getenv("ENABLE_BASH")
+    if raw_enable_bash is None or not raw_enable_bash.strip():
+        config = replace(config, enable_bash=True)
+    if not config.api_key:
         print("错误: 未设置 API_KEY，请配置 .env 文件")
         sys.exit(1)
-    if not tushare_token:
+    if not config.tushare_token:
         print("警告: 未设置 TUSHARE_TOKEN，market_ohlcv 将不可用")
 
-    # ── 2. 创建 Kernel ──
-    kernel = Kernel(model=model, base_url=base_url, api_key=api_key)
+    # ── 2. 组装 Kernel（runtime） ──
+    bundle = build_kernel_bundle(
+        config=config,
+        adapter_name="cli",
+        conversation_id="cli",
+        cwd=Path.cwd(),
+    )
+    kernel = bundle.kernel
+    workspace = bundle.workspace
 
-    # ── 3. 注册 6 工具 ──
-    cwd = Path.cwd()
-    if tushare_token:
-        adapter = TushareAdapter(token=tushare_token)
-        market.register(kernel, adapter)
-    compute.register(kernel)
-    read.register(kernel, workspace, cwd)
-    write.register(kernel, workspace, cwd)
-    edit.register(kernel, workspace, cwd)
-    bash.register(kernel, cwd=cwd)
-
-    # ── 4. 声明权限 ──
-    kernel.permission("soul.md", Permission.USER_CONFIRM)
-    kernel.permission("memory.md", Permission.FREE)
-    kernel.permission("notebook/**", Permission.FREE)
-    kernel.permission("__external__", Permission.USER_CONFIRM)
-
-    # ── 4.5 确认回调 ──
+    # ── 3. 确认回调 ──
     def _cli_confirm(path: str) -> bool:
         answer = input(f"\n确认操作 {path}? [y/n] ").strip().lower()
         return answer in ("y", "yes")
 
     kernel.on_confirm(_cli_confirm)
 
-    # ── 5. 自举 ──
-    kernel.boot(workspace)
+    # ── 4. Session 持久化（state_dir） + 兼容迁移 ──
+    legacy_path = workspace / ".session.json"
+    if legacy_path.exists() and not bundle.session_path.exists():
+        legacy = Session.load(legacy_path)
+        bundle.session_store.save(legacy)
 
-    # ── 6. JSONL trace ──
-    trace_path = workspace / "trace.jsonl"
-    _wire_trace(kernel, trace_path)
-
-    # ── 7. Wire: Soul 刷新 + Memory 压缩 ──
-    compressor = LLMCompressor(kernel.client, kernel.model)
-
-    kernel.wire("write:soul.md", lambda e, d: kernel._assemble_system_prompt())
-    kernel.wire("edit:soul.md", lambda e, d: kernel._assemble_system_prompt())
-    kernel.wire("write:memory.md", lambda e, d: _on_memory_write(kernel, workspace, compressor))
-    kernel.wire("edit:memory.md", lambda e, d: _on_memory_write(kernel, workspace, compressor))
-
-    # ── 8. Session 持久化 ──
-    session_path = workspace / ".session.json"
-    if session_path.exists():
-        session = Session.load(session_path)
+    session = bundle.session_store.load()
+    session.id = "cli"
+    if session.history:
         print(f"已恢复会话（{len(session.history)} 条历史）")
     else:
         session = Session(session_id="cli")
 
     # ── 9. REPL ──
-    print(f"投资助手已启动 | 模型: {model} | trace → {trace_path}")
+    print(f"投资助手已启动 | 模型: {config.model} | trace → {bundle.trace_path}")
     print("输入 quit 退出")
     try:
-        _repl(kernel, session, session_path)
+        _repl(kernel, session, bundle.session_store, config.session_keep_last_user_messages)
     finally:
-        session.save(session_path)
-        print(f"会话已保存 → {session_path}")
-
-
-def _on_memory_write(kernel: Kernel, workspace: Path, compressor: LLMCompressor) -> None:
-    """memory.md 超限时自动压缩"""
-    mem = workspace / "memory.md"
-    if not mem.exists():
-        return
-    content = mem.read_text(encoding="utf-8")
-    if len(content) <= MEMORY_MAX_CHARS:
-        return
-    compressed = compressor.compress(content, MEMORY_MAX_CHARS)
-    mem.write_text(compressed, encoding="utf-8")
-    kernel.emit("memory.compressed", {
-        "original_chars": len(content),
-        "compressed_chars": len(compressed),
-    })
-
-
-def _wire_trace(kernel: Kernel, trace_path: Path) -> None:
-    """挂载 JSONL trace — 通过 wire/emit 零侵入记录所有事件"""
-    trace_path.parent.mkdir(parents=True, exist_ok=True)
-
-    def _append(event: str, data: object) -> None:
-        record = {
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "event": event,
-            "data": data,
-        }
-        with open(trace_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, default=str, ensure_ascii=False) + "\n")
-
-    kernel.wire("turn.*", _append)
-    kernel.wire("tool:*", _append)
+        bundle.session_store.save(session)
+        # 保存路径由 store 决定；CLI 不需要额外打印绝对路径
 
 
 def _repl(
-    kernel: Kernel,
+    kernel: Any,
     session: Session,
-    session_path: Path,
+    store: SessionStore,
+    keep_last_user_messages: int,
 ) -> None:
     """交互循环"""
     while True:
@@ -186,7 +103,8 @@ def _repl(
         print(f"\n助手: {reply}")
 
         # 每轮自动保存（防崩溃丢失）
-        session.save(session_path)
+        session.prune(keep_last_user_messages=max(1, int(keep_last_user_messages)))
+        store.save(session)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,308 @@
+"""
+[INPUT]: asyncio, time, dataclasses, typing, agent.runtime, agent.kernel, agent.adapters.im.*
+[OUTPUT]: IMDriver
+[POS]: IM 通用驱动层：鉴权、路由、并发、进度/状态消息、confirm 桥接、session 落盘
+[PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
+"""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Callable
+
+from agent.adapters.im.backend import IMBackend, InboundMessage, OutboundRef
+from agent.adapters.im.confirm_bridge import make_sync_confirm
+from agent.adapters.im.progress import ProgressBuffer
+from agent.kernel import Session
+from agent.runtime import AgentConfig, KernelBundle, build_kernel_bundle
+
+
+def _chunk_text(text: str, *, max_len: int = 3900) -> list[str]:
+    """保守分片：优先按段落/换行切分，避免触发平台 4096 限制。"""
+    s = (text or "").strip()
+    if not s:
+        return [""]
+
+    if len(s) <= max_len:
+        return [s]
+
+    # 先按空行分段
+    parts: list[str] = []
+    buf = ""
+    for para in s.split("\n\n"):
+        para = para.strip()
+        if not para:
+            continue
+        candidate = (buf + ("\n\n" if buf else "") + para) if buf else para
+        if len(candidate) <= max_len:
+            buf = candidate
+            continue
+        if buf:
+            parts.append(buf)
+            buf = ""
+        # 段落仍过长 → 再按换行切
+        for line in para.split("\n"):
+            line = line.rstrip()
+            candidate2 = (buf + "\n" + line) if buf else line
+            if len(candidate2) <= max_len:
+                buf = candidate2
+            else:
+                if buf:
+                    parts.append(buf)
+                buf = ""
+                # 最后兜底硬切
+                for i in range(0, len(line), max_len):
+                    parts.append(line[i : i + max_len])
+    if buf:
+        parts.append(buf)
+    return parts
+
+
+@dataclass
+class _StatusUpdater:
+    backend: IMBackend
+    ref: OutboundRef
+    throttle_sec: float
+    render: Callable[[], str]
+
+    _dirty: bool = False
+    _task: asyncio.Task | None = None
+    _last_flush_ts: float = 0.0
+
+    def request_flush(self) -> None:
+        self._dirty = True
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self._flush_loop())
+
+    async def _flush_loop(self) -> None:
+        while self._dirty:
+            self._dirty = False
+            wait = max(0.0, self.throttle_sec - (time.monotonic() - self._last_flush_ts))
+            if wait:
+                await asyncio.sleep(wait)
+            try:
+                await self.backend.edit_text(self.ref, self.render())
+            except Exception:
+                # 进度更新失败不应影响主流程
+                pass
+            self._last_flush_ts = time.monotonic()
+
+
+@dataclass
+class ChatState:
+    conversation_id: str
+    bundle: KernelBundle
+    session: Session
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    progress: ProgressBuffer = field(default_factory=lambda: ProgressBuffer(max_lines=10))
+    status_ref: OutboundRef | None = None
+    status_updater: _StatusUpdater | None = None
+
+
+class IMDriver:
+    def __init__(
+        self,
+        *,
+        backend: IMBackend,
+        adapter_name: str,
+        config: AgentConfig,
+        allowed_user_ids: set[str],
+        confirm_timeout_sec: int = 60,
+        status_edit_throttle_sec: float = 1.0,
+        bundle_factory: Callable[[str, Path], KernelBundle] | None = None,
+    ) -> None:
+        self._backend = backend
+        self._adapter_name = adapter_name
+        self._config = config
+        self._allowed_user_ids = allowed_user_ids
+        self._confirm_timeout_sec = confirm_timeout_sec
+        self._status_edit_throttle_sec = status_edit_throttle_sec
+        self._bundle_factory = bundle_factory
+        self._chats: dict[str, ChatState] = {}
+
+    def _make_bundle(self, *, conversation_id: str, cwd: Path) -> KernelBundle:
+        if self._bundle_factory is not None:
+            return self._bundle_factory(conversation_id, cwd)
+        return build_kernel_bundle(
+            config=self._config,
+            adapter_name=self._adapter_name,
+            conversation_id=conversation_id,
+            cwd=cwd,
+        )
+
+    async def handle(self, msg: InboundMessage) -> None:
+        # 基础过滤
+        text = (msg.text or "").strip()
+        if not text:
+            return
+
+        if not msg.is_private:
+            await self._backend.send_text(msg.conversation_id, "请私聊使用。")
+            return
+
+        if self._allowed_user_ids and msg.user_id not in self._allowed_user_ids:
+            await self._backend.send_text(msg.conversation_id, "未授权用户，已拒绝。")
+            return
+
+        chat = await self._get_or_create_chat(msg.conversation_id)
+        async with chat.lock:
+            # commands
+            if text.startswith("/"):
+                await self._handle_command(chat, text)
+                return
+
+            chat.progress.reset()
+            status = await self._backend.send_text(msg.conversation_id, "思考中...")
+            chat.status_ref = status
+
+            def _render_status() -> str:
+                body = chat.progress.render()
+                if body:
+                    return "思考中...\n\n" + body
+                return "思考中..."
+
+            chat.status_updater = _StatusUpdater(
+                backend=self._backend,
+                ref=status,
+                throttle_sec=self._status_edit_throttle_sec,
+                render=_render_status,
+            )
+
+            # typing heartbeat
+            typing_task = asyncio.create_task(self._typing_heartbeat(msg.conversation_id))
+
+            try:
+                reply = await asyncio.to_thread(chat.bundle.kernel.turn, text, chat.session)
+            except Exception as exc:
+                await self._backend.send_text(msg.conversation_id, f"发生错误: {type(exc).__name__}: {exc}")
+                return
+            finally:
+                typing_task.cancel()
+                try:
+                    await typing_task
+                except asyncio.CancelledError:
+                    pass
+
+            # session prune + persist
+            keep = max(1, int(self._config.session_keep_last_user_messages))
+            chat.session.prune(keep_last_user_messages=keep)
+            chat.bundle.session_store.save(chat.session)
+
+            # finalize status
+            if chat.status_ref and chat.status_updater:
+                chat.progress.append("done")
+                chat.status_updater.request_flush()
+
+            for chunk in _chunk_text(reply):
+                if chunk:
+                    await self._backend.send_text(msg.conversation_id, chunk)
+
+    async def _typing_heartbeat(self, conversation_id: str) -> None:
+        while True:
+            try:
+                await self._backend.send_typing(conversation_id)
+            except Exception:
+                pass
+            await asyncio.sleep(4.0)
+
+    async def _handle_command(self, chat: ChatState, text: str) -> None:
+        cmd = text.strip().split()[0].lower()
+        if cmd in ("/start", "/help"):
+            await self._backend.send_text(
+                chat.conversation_id,
+                (
+                    "投资助手已接入 IM。\n"
+                    "可用命令: /start /help /reset /status\n"
+                    "直接发送文本开始对话。"
+                ),
+            )
+            return
+
+        if cmd == "/reset":
+            # 只清空 session，不动 workspace
+            chat.session = Session(session_id=chat.session.id)
+            chat.bundle.session_store.save(chat.session)
+            await self._backend.send_text(chat.conversation_id, "已重置会话。")
+            return
+
+        if cmd == "/status":
+            await self._backend.send_text(
+                chat.conversation_id,
+                (
+                    f"model={self._config.model}\n"
+                    f"base_url={self._config.base_url or '(default)'}\n"
+                    f"workspace={chat.bundle.workspace}\n"
+                    f"state={chat.bundle.state}\n"
+                    f"trace={chat.bundle.trace_path}\n"
+                    f"history={len(chat.session.history)}"
+                ),
+            )
+            return
+
+        await self._backend.send_text(chat.conversation_id, "未知命令。可用: /start /help /reset /status")
+
+    async def _get_or_create_chat(self, conversation_id: str) -> ChatState:
+        existing = self._chats.get(conversation_id)
+        if existing is not None:
+            return existing
+
+        cwd = self._config.workspace_dir.expanduser()
+        bundle = self._make_bundle(conversation_id=conversation_id, cwd=cwd)
+        session = bundle.session_store.load()
+        session.id = f"{self._adapter_name}:{conversation_id}"
+
+        loop = asyncio.get_running_loop()
+        bundle.kernel.on_confirm(
+            make_sync_confirm(
+                backend=self._backend,
+                loop=loop,
+                conversation_id=conversation_id,
+                timeout_sec=self._confirm_timeout_sec,
+            ),
+        )
+
+        chat = ChatState(conversation_id=conversation_id, bundle=bundle, session=session)
+
+        # wire events to progress (thread -> loop)
+        def _on_event(event: str, data: object) -> None:
+            loop.call_soon_threadsafe(self._handle_kernel_event, chat, event, data)
+
+        bundle.kernel.wire("turn.round", _on_event)
+        bundle.kernel.wire("llm.call.*", _on_event)
+        bundle.kernel.wire("tool.call.*", _on_event)
+        bundle.kernel.wire("tool:*", _on_event)
+        bundle.kernel.wire("memory.compressed", _on_event)
+
+        self._chats[conversation_id] = chat
+        return chat
+
+    def _handle_kernel_event(self, chat: ChatState, event: str, data: object) -> None:
+        if event == "turn.round":
+            try:
+                d = data or {}
+                r = d.get("round")
+                m = d.get("max")
+                if r and m:
+                    chat.progress.append(f"Round {r}/{m}")
+            except Exception:
+                pass
+        elif event.startswith("tool.call.start"):
+            try:
+                d = data or {}
+                name = str(d.get("name", "")).strip()
+                if name:
+                    chat.progress.append(f"tool {name} ...")
+            except Exception:
+                pass
+        elif event.startswith("tool:"):
+            # tool:xxx 事件 payload: {args, result}
+            name = event.split(":", 1)[1]
+            chat.progress.append(f"tool {name} ok")
+        elif event == "memory.compressed":
+            chat.progress.append("memory compressed")
+
+        if chat.status_updater is not None:
+            chat.status_updater.request_flush()

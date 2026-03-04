@@ -113,6 +113,23 @@ class Session:
         # assistant 有 tool_calls 但后面没有 tool response → 截断
         self.history.pop()
 
+    def prune(self, *, keep_last_user_messages: int) -> None:
+        """
+        裁剪历史，避免无限增长。
+
+        保留倒数 N 条 user 消息及其之后的所有消息（assistant/tool）。
+        """
+        keep = max(1, int(keep_last_user_messages))
+        user_idxs = [
+            i
+            for i, msg in enumerate(self.history)
+            if msg.get("role") == "user"
+        ]
+        if len(user_idxs) <= keep:
+            return
+        cut = user_idxs[-keep]
+        self.history = self.history[cut:]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # DataStore
@@ -396,7 +413,9 @@ class Kernel:
         )
         reply = ""
 
-        for _ in range(self.max_rounds):
+        for i in range(self.max_rounds):
+            round_num = i + 1
+            self.emit("turn.round", {"round": round_num, "max": self.max_rounds})
             kwargs: dict[str, Any] = {
                 "model": self.model,
                 "messages": prefix + session.history,
@@ -404,8 +423,18 @@ class Kernel:
             if tool_schemas:
                 kwargs["tools"] = tool_schemas
 
+            self.emit("llm.call.start", {"round": round_num})
             response = self.client.chat.completions.create(**kwargs)
             choice = response.choices[0]
+            tokens = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
+            self.emit(
+                "llm.call.done",
+                {
+                    "round": round_num,
+                    "finish_reason": choice.finish_reason,
+                    "total_tokens": tokens,
+                },
+            )
 
             # 存储 assistant 消息
             session.history.append(_msg_to_dict(choice.message))
@@ -421,6 +450,10 @@ class Kernel:
                         args = json.loads(tc.function.arguments)
                     except json.JSONDecodeError:
                         args = {}
+                    self.emit(
+                        "tool.call.start",
+                        {"name": tc.function.name, "args": args},
+                    )
                     tool_def = self._tools.get(tc.function.name)
                     if tool_def:
                         try:
@@ -432,6 +465,10 @@ class Kernel:
                         })
                     else:
                         result = {"error": f"未知工具: {tc.function.name}"}
+                    self.emit(
+                        "tool.call.done",
+                        {"name": tc.function.name, "result": result},
+                    )
 
                     session.history.append({
                         "role": "tool",

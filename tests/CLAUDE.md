@@ -38,5 +38,7 @@
 `test_agent_tools.py`: agent_tools.feature step definitions（fixture: atx，MockKernel + 双信任区域）
 `features/skills.feature`: Skill Engine 行为规格（6 scenarios：发现/注入/显式展开/disable-model-invocation/模型自主 skill_invoke）
 `test_skills.py`: skills.feature step definitions（fixture: sctx，Mock LLM + skill 临时目录）
+`features/im_driver.feature`: IM 通用驱动行为规格（4 scenarios：鉴权/进度状态/确认交互/会话持久化）
+`test_im_driver.py`: im_driver.feature step definitions（fixture: imctx，FakeBackend + FakeKernel + bundle_factory）
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
