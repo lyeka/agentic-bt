@@ -42,6 +42,6 @@
 
 ### bootstrap/
 `__init__.py`: 自举包入口
-`seed.py`: SEED_PROMPT — 首次启动种子 system prompt，引导 Agent 创建工作区
+`seed.py`: SEED_PROMPT — 首次启动种子 system prompt，给定初始人格与语言风格（口语化/有观点/短句），通过自然对话延迟结晶 soul.md/memory.md
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
