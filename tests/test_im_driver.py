@@ -41,6 +41,10 @@ def test_tool_progress_updates_status(): pass
 def test_confirm_delegates_to_backend(): pass
 
 
+@scenario(FEATURE, "默认不展示过程消息")
+def test_default_hide_process_messages(): pass
+
+
 class FakeKernel:
     def __init__(self) -> None:
         self._wires: dict[str, list] = defaultdict(list)
@@ -176,6 +180,22 @@ def given_driver(imctx, user_id):
         allowed_user_ids={user_id},
         confirm_timeout_sec=2,
         status_edit_throttle_sec=0.0,
+        show_process_messages=True,
+        bundle_factory=imctx["bundle_factory"],
+    )
+    imctx["driver"] = driver
+    return imctx
+
+
+@given(parsers.parse('一个默认 IM driver（allowlist 含 "{user_id}"）'), target_fixture="imctx")
+def given_default_driver(imctx, user_id):
+    driver = IMDriver(
+        backend=imctx["backend"],
+        adapter_name="test",
+        config=imctx["config"],
+        allowed_user_ids={user_id},
+        confirm_timeout_sec=2,
+        status_edit_throttle_sec=0.0,
         bundle_factory=imctx["bundle_factory"],
     )
     imctx["driver"] = driver
@@ -259,3 +279,14 @@ def then_backend_edited_status_contains(imctx, needle):
 @then("backend 收到确认请求")
 def then_backend_received_confirm(imctx):
     assert len(imctx["backend"].confirm_prompts) >= 1
+
+
+@then("backend 不发送状态消息")
+def then_backend_not_sent_status(imctx):
+    texts = [t for _cid, t in imctx["backend"].sent]
+    assert all("思考中" not in t for t in texts)
+
+
+@then("backend 不编辑状态消息")
+def then_backend_not_edited_status(imctx):
+    assert len(imctx["backend"].edited) == 0

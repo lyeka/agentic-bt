@@ -86,6 +86,8 @@ python -m agent.adapters.telegram
 - `WORKSPACE`（默认 `~/.agent/workspace`）用于 `soul.md/memory.md/notebook/`
 - `STATE_DIR`（默认 `~/.agent/state`）用于 session/trace 等运行状态
 - 默认 owner-only（`TELEGRAM_ALLOWED_USER_IDS`），未配置时只回显你的 `user_id` 并拒绝执行
+- `TELEGRAM_SHOW_PROCESS_MESSAGES` 默认 `false`：关闭中间过程消息（如 tool 调用进度）
+- `TELEGRAM_RENDER_MODE` 默认 `html`：对 LLM markdown 做基础渲染（支持标题/列表/粗斜体/代码块）
 
 ### 回测框架 Demo
 

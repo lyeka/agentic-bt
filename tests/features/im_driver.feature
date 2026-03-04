@@ -27,3 +27,9 @@ Feature: IM Driver — 渠道无关交互层
     Then backend 收到确认请求
     And backend 发送最终回复 "confirmed"
 
+  Scenario: 默认不展示过程消息
+    Given 一个默认 IM driver（allowlist 含 "u1"）
+    When 用户 "u1" 在会话 "c4" 发送 "hi"
+    Then backend 不发送状态消息
+    And backend 不编辑状态消息
+    And backend 发送最终回复 "reply:hi"

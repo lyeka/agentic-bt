@@ -8,7 +8,9 @@
 from __future__ import annotations
 
 import asyncio
+import html
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -31,6 +33,112 @@ def _parse_allowed_user_ids(raw: str | None) -> set[str]:
     return out
 
 
+def _parse_bool(raw: str | None, *, default: bool) -> bool:
+    if raw is None:
+        return default
+    v = raw.strip().lower()
+    if not v:
+        return default
+    return v in ("1", "true", "yes", "y", "on")
+
+
+def _normalize_render_mode(raw: str | None) -> str:
+    if raw is None:
+        return "html"
+    v = raw.strip().lower()
+    if not v:
+        return "html"
+    if v in ("none", "plain", "text"):
+        return "none"
+    if v in ("md", "markdown"):
+        return "markdown"
+    return "html"
+
+
+_INLINE_CODE_RE = re.compile(r"`([^`]+)`")
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_ITALIC_RE = re.compile(r"(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)")
+
+
+def _inline_markdown_to_html(text: str) -> str:
+    """最小可用的行内 markdown -> HTML（Telegram 支持标签子集）。"""
+    placeholders: list[str] = []
+
+    def _code_repl(match: re.Match[str]) -> str:
+        placeholders.append(html.escape(match.group(1)))
+        return f"@@CODE{len(placeholders) - 1}@@"
+
+    work = _INLINE_CODE_RE.sub(_code_repl, text)
+    work = html.escape(work)
+    work = _BOLD_RE.sub(r"<b>\1</b>", work)
+    work = _ITALIC_RE.sub(r"<i>\1</i>", work)
+
+    for i, code in enumerate(placeholders):
+        work = work.replace(f"@@CODE{i}@@", f"<code>{code}</code>")
+    return work
+
+
+def _markdown_to_html(text: str) -> str:
+    """
+    最小 markdown 渲染器（面向 Telegram HTML parse_mode）。
+
+    支持：标题、列表、粗体/斜体、行内代码、fenced code block。
+    """
+    lines = text.splitlines()
+    out: list[str] = []
+    in_code = False
+
+    for raw_line in lines:
+        line = raw_line.rstrip("\n")
+        if line.strip().startswith("```"):
+            if not in_code:
+                in_code = True
+                out.append("<pre><code>")
+            else:
+                in_code = False
+                out.append("</code></pre>")
+            continue
+
+        if in_code:
+            out.append(html.escape(line))
+            continue
+
+        if not line.strip():
+            out.append("")
+            continue
+
+        heading = re.match(r"^\s*#{1,6}\s+(.+)$", line)
+        if heading:
+            out.append(f"<b>{_inline_markdown_to_html(heading.group(1).strip())}</b>")
+            continue
+
+        bullet = re.match(r"^\s*[-*]\s+(.+)$", line)
+        if bullet:
+            out.append(f"• {_inline_markdown_to_html(bullet.group(1).strip())}")
+            continue
+
+        ordered = re.match(r"^\s*(\d+)\.\s+(.+)$", line)
+        if ordered:
+            out.append(f"{ordered.group(1)}. {_inline_markdown_to_html(ordered.group(2).strip())}")
+            continue
+
+        out.append(_inline_markdown_to_html(line))
+
+    if in_code:
+        out.append("</code></pre>")
+    return "\n".join(out)
+
+
+def _is_parse_error(exc: Exception) -> bool:
+    msg = str(exc).lower()
+    return (
+        "can't parse entities" in msg
+        or "cannot parse entities" in msg
+        or "unsupported start tag" in msg
+        or "entity" in msg
+    )
+
+
 @dataclass
 class TelegramBackend:
     """
@@ -41,15 +149,45 @@ class TelegramBackend:
 
     bot: Any
     _confirm_waiters: dict[str, asyncio.Future]  # confirm_id -> Future[bool]
+    render_mode: str = "html"  # none | markdown | html
+
+    def _prepare_text(self, text: str) -> tuple[str, str | None]:
+        if self.render_mode == "none":
+            return text, None
+        if self.render_mode == "markdown":
+            return text, "Markdown"
+        return _markdown_to_html(text), "HTML"
 
     async def send_text(self, conversation_id: str, text: str) -> OutboundRef:
         chat_id = int(conversation_id)
-        msg = await self.bot.send_message(chat_id=chat_id, text=text)
+        payload, parse_mode = self._prepare_text(text)
+        if parse_mode:
+            try:
+                msg = await self.bot.send_message(chat_id=chat_id, text=payload, parse_mode=parse_mode)
+            except Exception as exc:
+                if not _is_parse_error(exc):
+                    raise
+                msg = await self.bot.send_message(chat_id=chat_id, text=text)
+        else:
+            msg = await self.bot.send_message(chat_id=chat_id, text=text)
         return OutboundRef(conversation_id=conversation_id, message_id=str(msg.message_id))
 
     async def edit_text(self, ref: OutboundRef, text: str) -> None:
         chat_id = int(ref.conversation_id)
         message_id = int(ref.message_id)
+        payload, parse_mode = self._prepare_text(text)
+        if parse_mode:
+            try:
+                await self.bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    text=payload,
+                    parse_mode=parse_mode,
+                )
+                return
+            except Exception as exc:
+                if not _is_parse_error(exc):
+                    raise
         await self.bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=text)
 
     async def send_typing(self, conversation_id: str) -> None:
@@ -107,6 +245,11 @@ def main() -> None:
     status_throttle = float(os.getenv("TELEGRAM_STATUS_EDIT_THROTTLE_SEC", "1.0"))
     confirm_timeout = int(os.getenv("TELEGRAM_CONFIRM_TIMEOUT_SEC", "60"))
     drop_pending = os.getenv("TELEGRAM_DROP_PENDING_UPDATES", "true").strip().lower() in ("1", "true", "yes", "y")
+    show_process_messages = _parse_bool(
+        os.getenv("TELEGRAM_SHOW_PROCESS_MESSAGES"),
+        default=False,
+    )
+    render_mode = _normalize_render_mode(os.getenv("TELEGRAM_RENDER_MODE"))
 
     # 运行时导入，避免未安装依赖时报错影响其他模块
     try:
@@ -172,7 +315,11 @@ def main() -> None:
         await driver.handle(msg)
 
     app = Application.builder().token(token).build()
-    backend = TelegramBackend(bot=app.bot, _confirm_waiters=confirm_waiters)
+    backend = TelegramBackend(
+        bot=app.bot,
+        _confirm_waiters=confirm_waiters,
+        render_mode=render_mode,
+    )
     driver = IMDriver(
         backend=backend,
         adapter_name="telegram",
@@ -180,6 +327,7 @@ def main() -> None:
         allowed_user_ids=allowed,
         confirm_timeout_sec=confirm_timeout,
         status_edit_throttle_sec=status_throttle,
+        show_process_messages=show_process_messages,
     )
     app.add_handler(CallbackQueryHandler(on_callback_query))
     app.add_handler(MessageHandler(filters.TEXT, on_message))

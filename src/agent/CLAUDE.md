@@ -26,7 +26,7 @@
 ### adapters/
 `__init__.py`: 适配器层入口
 `cli.py`: CLI REPL 入口（dotenv + runtime 统一组装 + state_dir Session 持久化 + 旧会话迁移）
-`telegram.py`: Telegram Bot 入口（polling + allowlist + InboundMessage 映射 + IMDriver 驱动）
+`telegram.py`: Telegram Bot 入口（polling + allowlist + InboundMessage 映射 + IMDriver 驱动 + markdown->HTML 基础渲染 + 过程消息开关）
 
 ### adapters/im/
 `__init__.py`: IM 通用驱动层入口

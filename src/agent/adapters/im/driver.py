@@ -112,6 +112,7 @@ class IMDriver:
         allowed_user_ids: set[str],
         confirm_timeout_sec: int = 60,
         status_edit_throttle_sec: float = 1.0,
+        show_process_messages: bool = False,
         bundle_factory: Callable[[str, Path], KernelBundle] | None = None,
     ) -> None:
         self._backend = backend
@@ -120,6 +121,7 @@ class IMDriver:
         self._allowed_user_ids = allowed_user_ids
         self._confirm_timeout_sec = confirm_timeout_sec
         self._status_edit_throttle_sec = status_edit_throttle_sec
+        self._show_process_messages = show_process_messages
         self._bundle_factory = bundle_factory
         self._chats: dict[str, ChatState] = {}
 
@@ -154,25 +156,29 @@ class IMDriver:
                 await self._handle_command(chat, text)
                 return
 
-            chat.progress.reset()
-            status = await self._backend.send_text(msg.conversation_id, "思考中...")
-            chat.status_ref = status
+            typing_task: asyncio.Task | None = None
+            if self._show_process_messages:
+                chat.progress.reset()
+                status = await self._backend.send_text(msg.conversation_id, "思考中...")
+                chat.status_ref = status
 
-            def _render_status() -> str:
-                body = chat.progress.render()
-                if body:
-                    return "思考中...\n\n" + body
-                return "思考中..."
+                def _render_status() -> str:
+                    body = chat.progress.render()
+                    if body:
+                        return "思考中...\n\n" + body
+                    return "思考中..."
 
-            chat.status_updater = _StatusUpdater(
-                backend=self._backend,
-                ref=status,
-                throttle_sec=self._status_edit_throttle_sec,
-                render=_render_status,
-            )
-
-            # typing heartbeat
-            typing_task = asyncio.create_task(self._typing_heartbeat(msg.conversation_id))
+                chat.status_updater = _StatusUpdater(
+                    backend=self._backend,
+                    ref=status,
+                    throttle_sec=self._status_edit_throttle_sec,
+                    render=_render_status,
+                )
+                # typing heartbeat
+                typing_task = asyncio.create_task(self._typing_heartbeat(msg.conversation_id))
+            else:
+                chat.status_ref = None
+                chat.status_updater = None
 
             try:
                 reply = await asyncio.to_thread(chat.bundle.kernel.turn, text, chat.session)
@@ -180,11 +186,12 @@ class IMDriver:
                 await self._backend.send_text(msg.conversation_id, f"发生错误: {type(exc).__name__}: {exc}")
                 return
             finally:
-                typing_task.cancel()
-                try:
-                    await typing_task
-                except asyncio.CancelledError:
-                    pass
+                if typing_task is not None:
+                    typing_task.cancel()
+                    try:
+                        await typing_task
+                    except asyncio.CancelledError:
+                        pass
 
             # session prune + persist
             keep = max(1, int(self._config.session_keep_last_user_messages))
@@ -267,14 +274,15 @@ class IMDriver:
         chat = ChatState(conversation_id=conversation_id, bundle=bundle, session=session)
 
         # wire events to progress (thread -> loop)
-        def _on_event(event: str, data: object) -> None:
-            loop.call_soon_threadsafe(self._handle_kernel_event, chat, event, data)
+        if self._show_process_messages:
+            def _on_event(event: str, data: object) -> None:
+                loop.call_soon_threadsafe(self._handle_kernel_event, chat, event, data)
 
-        bundle.kernel.wire("turn.round", _on_event)
-        bundle.kernel.wire("llm.call.*", _on_event)
-        bundle.kernel.wire("tool.call.*", _on_event)
-        bundle.kernel.wire("tool:*", _on_event)
-        bundle.kernel.wire("memory.compressed", _on_event)
+            bundle.kernel.wire("turn.round", _on_event)
+            bundle.kernel.wire("llm.call.*", _on_event)
+            bundle.kernel.wire("tool.call.*", _on_event)
+            bundle.kernel.wire("tool:*", _on_event)
+            bundle.kernel.wire("memory.compressed", _on_event)
 
         self._chats[conversation_id] = chat
         return chat
