@@ -26,8 +26,15 @@
 
 ### adapters/
 `__init__.py`: 适配器层入口
-`cli.py`: CLI REPL 入口（dotenv + runtime 统一组装 + state_dir Session 持久化 + 旧会话迁移）
+`cli.py`: CLI 入口（dotenv + runtime 组装 + 默认启动 TUI + --simple 回退纯文本 REPL）
 `telegram.py`: Telegram Bot 入口（polling + allowlist + InboundMessage 映射 + IMDriver 驱动 + markdown->HTML 基础渲染 + 过程消息开关）
+
+### adapters/tui/
+`__init__.py`: TUI 终端界面包入口
+`app.py`: InvestmentApp(App) — Textual TUI 主界面（布局/ChatInput/UserSubmitted 消息/worker 线程 kernel.turn/进度事件渲染/confirm 桥接/sidebar 工作区状态）
+`screens.py`: ConfirmScreen(ModalScreen) — 文件写入确认对话框（y/n 快捷键 + 按钮）
+`commands.py`: AppCommandProvider(Provider) — 命令面板（重置会话/切换侧边栏/查看状态/退出）
+`app.tcss`: TUI CSS 样式（布局/消息气泡/侧边栏/输入区）
 
 ### adapters/im/
 `__init__.py`: IM 通用驱动层入口

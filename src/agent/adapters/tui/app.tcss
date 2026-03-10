@@ -1,0 +1,68 @@
+/* InvestmentApp — TUI 终端界面样式 */
+
+#main {
+    height: 1fr;
+}
+
+#chat {
+    width: 3fr;
+    padding: 0 1;
+}
+
+#sidebar {
+    width: 1fr;
+    min-width: 24;
+    max-width: 40;
+    border-left: solid $accent;
+    padding: 1;
+}
+
+#sidebar-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.sidebar-section {
+    margin-bottom: 1;
+}
+
+.sidebar-label {
+    text-style: bold;
+    color: $text-muted;
+}
+
+.sidebar-content {
+    margin-left: 1;
+}
+
+#input {
+    height: auto;
+    min-height: 3;
+    max-height: 8;
+    dock: bottom;
+    border-top: solid $accent;
+}
+
+.user-msg {
+    background: $primary-background;
+    padding: 0 1;
+    margin: 1 0 0 8;
+    border: round $primary;
+}
+
+.assistant-msg {
+    padding: 0 1;
+    margin: 1 8 0 0;
+}
+
+.tool-status {
+    color: $text-muted;
+    padding: 0 1;
+    margin: 0 8 0 2;
+}
+
+.thinking {
+    color: $text-muted;
+    padding: 0 1;
+    margin: 0 8 0 2;
+}
