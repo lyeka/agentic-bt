@@ -30,10 +30,18 @@
 `features/memory_compress.feature`: Memory 自动压缩行为规格（3 scenarios：超限触发/未超限/markdown格式）
 `test_kernel.py`: kernel.feature step definitions（fixture: kctx，Mock LLM）
 `test_memory_compress.py`: memory_compress.feature step definitions（fixture: mcctx，mock LLM 压缩）
-`features/kernel_tools.feature`: Kernel 工具与工作区行为规格（9 scenarios：market/compute/read/write/edit/权限/Session 持久化/自举；recall 已移除）
-`test_kernel_tools.py`: kernel_tools.feature step definitions（fixture: ktctx，直接调用 handler）
+`features/kernel_tools.feature`: Kernel 工具与工作区行为规格（11 scenarios：market OHLCV 数据返回+日期透传/compute/read/write/edit/权限/Session 持久化/自举；recall 已移除）
+`test_kernel_tools.py`: kernel_tools.feature step definitions（fixture: ktctx，直接调用 handler，SpyAdapter 记录 fetch 参数）
+`features/sandbox_thread.feature`: 沙箱线程安全行为规格（3 scenarios：主线程执行/子线程执行/子线程超时）
+`test_sandbox_thread.py`: sandbox_thread.feature step definitions（fixture: sbtx，threading.Thread 子线程验证）
 `features/tushare_adapter.feature`: TushareAdapter 行为规格（5 scenarios：列名标准化/日期类型/排序/日期范围透传/默认范围）
 `test_tushare_adapter.py`: tushare_adapter.feature step definitions（fixture: tsctx，mock tushare API）
+`features/yfinance_adapter.feature`: YFinanceAdapter 行为规格（5 scenarios：列名标准化/日期类型/排序/日期范围透传/默认范围）
+`test_yfinance_adapter.py`: yfinance_adapter.feature step definitions（fixture: yfctx，mock yfinance download）
+`features/finnhub_adapter.feature`: FinnhubAdapter 行为规格（5 scenarios：列名标准化/日期类型/排序/UNIX时间戳透传/默认范围）
+`test_finnhub_adapter.py`: finnhub_adapter.feature step definitions（fixture: fhctx，mock finnhub client）
+`features/market_routing.feature`: CompositeMarketAdapter 路由行为规格（5 scenarios：匹配路由/fallback/first-match-wins/无fallback异常/仅fallback）
+`test_market_routing.py`: market_routing.feature step definitions（fixture: mrctx，FakeAdapter 纯路由逻辑）
 `features/agent_tools.feature`: Agent 工具系统行为规格（20 scenarios：read 分页截断行号/edit 模糊匹配唯一性diff/write 字节数/bash 超时截断/路径安全）
 `test_agent_tools.py`: agent_tools.feature step definitions（fixture: atx，MockKernel + 双信任区域）
 `features/skills.feature`: Skill Engine 行为规格（6 scenarios：发现/注入/显式展开/disable-model-invocation/模型自主 skill_invoke）

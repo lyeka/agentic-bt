@@ -1,5 +1,5 @@
 # AgenticBT - Agent 时代的个人投资助手
-Python 3.10+ · openai · pandas · pandas-ta · tushare · python-dotenv · pytest-bdd
+Python 3.10+ · openai · pandas · pandas-ta · tushare · yfinance · python-dotenv · pytest-bdd
 
 > "Backtest the Trader, Not Just the Strategy."
 > 回测交易员，而不仅仅是策略。
@@ -39,7 +39,7 @@ tests/ - BDD 测试 + E2E（18 features + 19 test_*.py step definitions/e2e + co
 | 模块 | 职责 | 设计文档 |
 |------|------|---------|
 | **core/** | | |
-| core/sandbox.py | exec_compute 沙箱执行器：eval-first/黑名单 builtins/Trading Coreutils/SIGALRM 超时/自动降维 | docs/compute.md |
+| core/sandbox.py | exec_compute 沙箱执行器：eval-first/黑名单 builtins/Trading Coreutils/线程安全超时（主线程 SIGALRM + 非主线程 ThreadPoolExecutor）/自动降维 | docs/compute.md |
 | core/indicators.py | IndicatorEngine，pandas-ta 防前瞻包装，6 指标 | - |
 | core/tracer.py | TraceWriter 本地 JSONL 追踪，对齐 OTel GenAI | docs/tracer.md |
 | **agenticbt/** | | |
@@ -80,6 +80,51 @@ OPENAI_API_KEY=sk-... python demo.py --provider openai --csv your_data.csv
 - Claude: `base_url="https://api.anthropic.com/v1/"`
 - GPT: `base_url=None`（默认 OpenAI）
 - Ollama: `base_url="http://localhost:11434/v1/"`
+
+## 数据源配置
+
+### A 股 — Tushare（需 Token）
+
+1. 注册 [tushare.pro](https://tushare.pro/) 账号
+2. 完善个人信息获取积分（基础积分即可用 daily 接口）
+3. 在「个人主页 → 接口TOKEN」页面复制 Token
+4. 配置环境变量：`TUSHARE_TOKEN=your_token`
+
+### 美股 — yfinance（零配置）
+
+无需注册、无需 API Key。安装即用：
+
+```bash
+pip install yfinance
+```
+
+> 注意：yfinance 通过非官方渠道获取 Yahoo Finance 数据，高频调用可能被限流。
+> 建议控制请求间隔，避免在云环境大批量拉取。
+
+### 美股（后备）— Finnhub（需免费 API Key）
+
+1. 访问 [finnhub.io](https://finnhub.io/) → 点击 "Get free API key"
+2. 使用邮箱注册（支持 Google/GitHub 一键登录）
+3. 注册后在 Dashboard 页面即可看到 API Key
+4. 配置环境变量：`FINNHUB_API_KEY=your_key`
+
+**免费额度：** 60 次/分钟，足够 Agent 日常使用
+
+### .env 配置示例
+
+```env
+# 市场数据源声明（默认 yfinance，零配置即可用）
+MARKET_CN=tushare              # A 股：tushare / yfinance
+MARKET_US=yfinance             # 美股：yfinance / finnhub
+
+# 各数据源 Credentials（按需配置）
+TUSHARE_TOKEN=your_tushare_token
+FINNHUB_API_KEY=your_finnhub_key
+
+# LLM 提供商（选一个）
+OPENAI_API_KEY=sk-...
+ANTHROPIC_API_KEY=sk-ant-...
+```
 
 ## BDD 开发规范
 
@@ -170,7 +215,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-239 tests 全绿。agent 持久投资助手进入 Phase 2（runtime 统一组装 + SessionStore + IMDriver + Telegram polling 入口 + 会话上下文管理：auto-compact/overflow recovery/手动 compact/context 统计）。agenticbt 回测框架完成（确定性引擎 + 多资产 + bracket/limit/stop + 风控 + 11 工具）。项目重心继续在 Phase 2（Discord/Webhook/流式输出/定时任务）。
+258 tests 全绿。agent 持久投资助手进入 Phase 2（runtime 统一组装 + SessionStore + IMDriver + Telegram polling 入口 + 会话上下文管理：auto-compact/overflow recovery/手动 compact/context 统计）。agenticbt 回测框架完成（确定性引擎 + 多资产 + bracket/limit/stop + 风控 + 11 工具）。美股数据接入完成（yfinance 默认 + Finnhub 后备 + Composite 多源路由 + MARKET_CN/MARKET_US 显式声明）。compute 沙箱线程安全（signal + ThreadPoolExecutor 双轨），market_ohlcv 返回原始 OHLCV（LLM 直接推理）。项目重心继续在 Phase 2（Discord/Webhook/流式输出/定时任务）。
 路线图：docs/roadmap.md
 
 # currentDate

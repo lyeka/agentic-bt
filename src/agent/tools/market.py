@@ -1,7 +1,7 @@
 """
 [INPUT]: agent.kernel (Kernel), pandas
 [OUTPUT]: MarketAdapter Protocol + register()
-[POS]: 领域核心工具，获取 OHLCV 并注入 DataStore；adapter pattern 解耦数据源
+[POS]: 领域核心工具，获取 OHLCV 并注入 DataStore；返回原始数据供 LLM 直接推理；adapter pattern 解耦数据源
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -39,31 +39,45 @@ def register(kernel: object, adapter: MarketAdapter) -> None:
     def market_ohlcv(args: dict) -> dict:
         symbol = args["symbol"]
         period = args.get("period", "daily")
-        df = adapter.fetch(symbol, period)
+        start = args.get("start")
+        end = args.get("end")
+        df = adapter.fetch(symbol, period, start=start, end=end)
 
         # 存入 DataStore（compute 可消费）
         kernel.data.set(f"ohlcv:{symbol}", df)
         kernel.data.set("_default_ohlcv", df)
 
         kernel.emit(f"market.ohlcv.done:{symbol}", {"symbol": symbol})
+
+        # 返回原始 OHLCV records — 数据即答案
+        records = []
+        for _, r in df.iterrows():
+            d = r["date"]
+            records.append({
+                "date": str(d.date()) if hasattr(d, "date") else str(d),
+                "open": round(float(r["open"]), 2),
+                "high": round(float(r["high"]), 2),
+                "low": round(float(r["low"]), 2),
+                "close": round(float(r["close"]), 2),
+                "volume": int(r["volume"]),
+            })
+
         return {
             "symbol": symbol,
-            "rows": len(df),
-            "columns": list(df.columns),
-            "latest": {
-                "date": str(df["date"].iloc[-1]),
-                "close": float(df["close"].iloc[-1]),
-            },
+            "total_rows": len(records),
+            "data": records,
         }
 
     kernel.tool(
         name="market_ohlcv",
-        description="获取指定标的的 OHLCV 行情数据",
+        description="获取 OHLCV 行情数据（返回完整日线：date/open/high/low/close/volume），可直接分析",
         parameters={
             "type": "object",
             "properties": {
-                "symbol": {"type": "string", "description": "标的代码"},
+                "symbol": {"type": "string", "description": "标的代码，如 AAPL、000001.SZ"},
                 "period": {"type": "string", "description": "周期", "default": "daily"},
+                "start": {"type": "string", "description": "起始日期 YYYY-MM-DD，省略则默认近一年"},
+                "end": {"type": "string", "description": "截止日期 YYYY-MM-DD，省略则默认今天"},
             },
             "required": ["symbol"],
         },

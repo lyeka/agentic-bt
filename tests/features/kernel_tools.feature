@@ -3,11 +3,17 @@ Feature: Kernel 工具与工作区 — Phase 1b/1c 完整验证
 
   # ── Phase 1b: 能看能算 ──
 
-  Scenario: market_ohlcv 获取行情
+  Scenario: market_ohlcv 返回 OHLCV 数据
     Given 一个带市场工具的 Kernel
     When 调用 market_ohlcv symbol "TEST"
-    Then 结果包含 rows 和 latest
+    Then 结果包含 data 列表和 total_rows
+    And data 每条记录含 date/open/high/low/close/volume
     And DataStore 中存在 "ohlcv:TEST"
+
+  Scenario: market_ohlcv 透传 start/end 参数
+    Given 一个带市场工具的 Kernel（记录 fetch 参数）
+    When 调用 market_ohlcv symbol "TEST" start "2024-01-01" end "2024-01-05"
+    Then adapter 收到 start "2024-01-01" 和 end "2024-01-05"
 
   Scenario: compute 使用行情数据计算
     Given 一个带市场工具的 Kernel
