@@ -1,7 +1,7 @@
 """
-[INPUT]: pandas, numpy, pandas_ta, math, signal, builtins, io, traceback, ast
+[INPUT]: pandas, numpy, pandas_ta, math, signal, builtins, io, traceback, ast, threading, concurrent.futures
 [OUTPUT]: exec_compute — 沙箱化 Python 执行器；HELPERS — Trading Coreutils（含 REPL 语义与输出治理）
-[POS]: 公共计算沙箱，被 agenticbt/tools.py 和 agent/tools/compute.py 消费
+[POS]: 公共计算沙箱，被 agenticbt/tools.py 和 agent/tools/compute.py 消费；主线程 signal 超时 / 非主线程 ThreadPoolExecutor 降级
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -12,7 +12,10 @@ import builtins as _builtins
 import io
 import math
 import signal as _signal
+import threading as _threading
 import traceback as _traceback
+from concurrent.futures import ThreadPoolExecutor as _ThreadPool
+from concurrent.futures import TimeoutError as _FuturesTimeout
 from datetime import date as _date
 from datetime import datetime as _datetime
 from typing import Any
@@ -239,7 +242,18 @@ def exec_compute(
         **HELPERS,
     }
 
-    # 超时保护（SIGALRM，仅 Unix/macOS）
+    # ── 超时分派：主线程 signal / 非主线程 futures ──
+    in_main = _threading.current_thread() is _threading.main_thread()
+
+    if in_main:
+        return _exec_with_signal(code, local_ns, stdout_buf, timeout_ms)
+    return _exec_with_futures(code, local_ns, stdout_buf, timeout_ms)
+
+
+def _exec_with_signal(
+    code: str, local_ns: dict, stdout_buf: io.StringIO, timeout_ms: int,
+) -> dict[str, Any]:
+    """主线程：SIGALRM 超时（精准、零开销）。"""
     def _timeout_handler(_signum: int, _frame: Any) -> None:
         raise TimeoutError("计算超时")
 
@@ -271,6 +285,41 @@ def exec_compute(
     finally:
         _signal.setitimer(_signal.ITIMER_REAL, 0)
         _signal.signal(_signal.SIGALRM, old_handler)
+
+
+def _exec_with_futures(
+    code: str, local_ns: dict, stdout_buf: io.StringIO, timeout_ms: int,
+) -> dict[str, Any]:
+    """非主线程：ThreadPoolExecutor 超时降级。"""
+    pool = _ThreadPool(max_workers=1)
+    future = pool.submit(_exec_code, code, local_ns)
+    try:
+        result = future.result(timeout=timeout_ms / 1000)
+        stdout = stdout_buf.getvalue()
+        if stdout:
+            result["_stdout"] = stdout
+        pool.shutdown(wait=False, cancel_futures=True)
+        return result
+    except _FuturesTimeout:
+        pool.shutdown(wait=False, cancel_futures=True)
+        return {
+            "error": "计算超时，请简化代码或减少数据量",
+            "remediation": "避免 while/for 纯 Python 大循环；优先用 pandas/numpy 向量化与 rolling。",
+        }
+    except SyntaxError as e:
+        pool.shutdown(wait=False, cancel_futures=True)
+        return {
+            "error": f"SyntaxError: {e}",
+            "remediation": "检查 Python 语法（缩进/冒号/括号）。",
+        }
+    except Exception as e:
+        pool.shutdown(wait=False, cancel_futures=True)
+        tb_lines = _traceback.format_exc().strip().split("\n")
+        return {
+            "error": f"{type(e).__name__}: {e}",
+            "remediation": _remediation_for_exc(e),
+            "traceback": "\n".join(tb_lines[-8:]),
+        }
 
 
 def _exec_code(code: str, local_ns: dict[str, Any]) -> dict[str, Any]:

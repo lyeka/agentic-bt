@@ -12,6 +12,7 @@ dependencies = [
     "pandas>=2.0",
     "pandas-ta",
     "tushare",
+    "yfinance>=0.2.40",
     "python-dotenv",
     "PyYAML>=6.0",
     "textual>=1.0",
@@ -24,6 +25,9 @@ dev = [
 ]
 telegram = [
     "python-telegram-bot>=22.6",
+]
+finnhub = [
+    "finnhub-python>=2.4.20",
 ]
 
 [tool.hatch.build.targets.wheel]

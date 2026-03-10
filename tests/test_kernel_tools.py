@@ -21,8 +21,11 @@ from agent.tools import compute, edit, market, read, write
 
 FEATURE = "features/kernel_tools.feature"
 
-@scenario(FEATURE, "market_ohlcv 获取行情")
+@scenario(FEATURE, "market_ohlcv 返回 OHLCV 数据")
 def test_market_ohlcv(): pass
+
+@scenario(FEATURE, "market_ohlcv 透传 start/end 参数")
+def test_market_ohlcv_date_range(): pass
 
 @scenario(FEATURE, "compute 使用行情数据计算")
 def test_compute(): pass
@@ -78,6 +81,22 @@ def given_kernel_with_market():
     market.register(kernel, adapter)
     compute.register(kernel)
     return {"kernel": kernel}
+
+
+@given("一个带市场工具的 Kernel（记录 fetch 参数）", target_fixture="ktctx")
+def given_kernel_with_spy_market():
+    kernel = Kernel(api_key="test")
+    call_log: list[dict] = []
+
+    class SpyAdapter:
+        name = "spy"
+
+        def fetch(self, symbol, period="daily", start=None, end=None):
+            call_log.append({"symbol": symbol, "period": period, "start": start, "end": end})
+            return _sample_df()
+
+    market.register(kernel, SpyAdapter())
+    return {"kernel": kernel, "call_log": call_log}
 
 
 @given("一个带文件工具的 Kernel", target_fixture="ktctx")
@@ -150,6 +169,14 @@ def when_market(ktctx, symbol):
     return ktctx
 
 
+@when(parsers.parse('调用 market_ohlcv symbol "{symbol}" start "{start}" end "{end}"'), target_fixture="ktctx")
+def when_market_date_range(ktctx, symbol, start, end):
+    ktctx["result"] = ktctx["kernel"]._tools["market_ohlcv"].handler(
+        {"symbol": symbol, "start": start, "end": end},
+    )
+    return ktctx
+
+
 @when(parsers.parse('调用 compute code "{code}"'), target_fixture="ktctx")
 def when_compute(ktctx, code):
     ktctx["result"] = ktctx["kernel"]._tools["compute"].handler({"code": code})
@@ -198,11 +225,26 @@ def when_boot(ktctx):
 # Then
 # ─────────────────────────────────────────────────────────────────────────────
 
-@then("结果包含 rows 和 latest")
-def then_has_rows_latest(ktctx):
+@then("结果包含 data 列表和 total_rows")
+def then_has_data_and_total(ktctx):
     r = ktctx["result"]
-    assert "rows" in r and r["rows"] > 0
-    assert "latest" in r
+    assert "data" in r and isinstance(r["data"], list)
+    assert "total_rows" in r and r["total_rows"] > 0
+
+
+@then("data 每条记录含 date/open/high/low/close/volume")
+def then_data_has_ohlcv_fields(ktctx):
+    for rec in ktctx["result"]["data"]:
+        for key in ("date", "open", "high", "low", "close", "volume"):
+            assert key in rec, f"缺少字段: {key}"
+
+
+@then(parsers.parse('adapter 收到 start "{start}" 和 end "{end}"'))
+def then_adapter_received_dates(ktctx, start, end):
+    log = ktctx["call_log"]
+    assert len(log) >= 1
+    assert log[-1]["start"] == start
+    assert log[-1]["end"] == end
 
 
 @then(parsers.parse('DataStore 中存在 "{key}"'))

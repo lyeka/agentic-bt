@@ -1,5 +1,5 @@
 """
-[INPUT]: os, pathlib, agent.kernel, agent.tools, agent.adapters.market.tushare, agent.adapters.web.tavily, agent.session_store
+[INPUT]: os, pathlib, agent.kernel, agent.tools, agent.adapters.market.{tushare,yfinance,finnhub,composite}, agent.adapters.web.tavily, agent.session_store
 [OUTPUT]: AgentConfig, KernelBundle, build_kernel_bundle
 [POS]: 入口无关的 Kernel 组装层：统一 tools/permission/wire/trace/session_store 路径约定
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -17,6 +17,8 @@ from typing import Callable
 from agent.kernel import Kernel, MEMORY_MAX_CHARS, Permission
 from agent.session_store import JsonSessionStore, SessionStore
 from agent.adapters.market.tushare import TushareAdapter
+from agent.adapters.market.yfinance import YFinanceAdapter
+from agent.adapters.market.composite import CompositeMarketAdapter, is_ashare
 from agent.tools import bash, compute, edit, market, read, web, write
 
 
@@ -26,6 +28,9 @@ class AgentConfig:
     base_url: str | None
     api_key: str | None
     tushare_token: str | None
+    finnhub_api_key: str | None
+    market_cn: str
+    market_us: str
     workspace_dir: Path
     state_dir: Path
     enable_bash: bool = True
@@ -40,6 +45,9 @@ class AgentConfig:
         base_url = os.getenv("BASE_URL") or None
         api_key = os.getenv("API_KEY")
         tushare_token = os.getenv("TUSHARE_TOKEN")
+        finnhub_api_key = os.getenv("FINNHUB_API_KEY") or None
+        market_cn = os.getenv("MARKET_CN", "yfinance")
+        market_us = os.getenv("MARKET_US", "yfinance")
         workspace_dir = Path(os.getenv("WORKSPACE", "~/.agent/workspace")).expanduser()
         state_dir = Path(os.getenv("STATE_DIR", "~/.agent/state")).expanduser()
         enable_bash = os.getenv("ENABLE_BASH", "1").strip().lower() not in ("0", "false", "no", "n")
@@ -52,6 +60,9 @@ class AgentConfig:
             base_url=base_url,
             api_key=api_key,
             tushare_token=tushare_token,
+            finnhub_api_key=finnhub_api_key,
+            market_cn=market_cn,
+            market_us=market_us,
             workspace_dir=workspace_dir,
             state_dir=state_dir,
             enable_bash=enable_bash,
@@ -134,6 +145,18 @@ def _on_memory_write(kernel: Kernel, workspace: Path, compressor: LLMCompressor)
     )
 
 
+def _make_adapter(name: str, config: AgentConfig) -> object:
+    """按名称构造 MarketAdapter 实例"""
+    if name == "tushare":
+        return TushareAdapter(token=config.tushare_token)
+    if name == "yfinance":
+        return YFinanceAdapter()
+    if name == "finnhub":
+        from agent.adapters.market.finnhub import FinnhubAdapter
+        return FinnhubAdapter(api_key=config.finnhub_api_key)
+    raise ValueError(f"Unknown market adapter: {name}")
+
+
 def build_kernel_bundle(
     *,
     config: AgentConfig,
@@ -157,10 +180,16 @@ def build_kernel_bundle(
         context_window=config.context_window, compact_recent_turns=config.compact_recent_turns,
     )
 
-    # tools
-    if config.tushare_token:
-        adapter = TushareAdapter(token=config.tushare_token)
-        market.register(kernel, adapter)
+    # ── market 工具（显式声明数据源）──
+    cn = _make_adapter(config.market_cn, config)
+    us = _make_adapter(config.market_us, config)
+    if config.market_cn == config.market_us:
+        market.register(kernel, cn)
+    else:
+        composite = CompositeMarketAdapter()
+        composite.route(is_ashare, cn)
+        composite.fallback(us)
+        market.register(kernel, composite)
     compute.register(kernel)
     read.register(kernel, workspace, cwd=cwd)
     write.register(kernel, workspace, cwd=cwd)
