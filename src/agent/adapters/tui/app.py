@@ -1,24 +1,28 @@
 """
-[INPUT]: textual, threading, agent.kernel, agent.runtime
+[INPUT]: textual, threading, time, datetime, agent.kernel, agent.runtime, agent.adapters.tui.{widgets,sidebar,commands,screens}
 [OUTPUT]: InvestmentApp — Textual TUI 投资助手主界面
-[POS]: TUI 展示层适配器：布局/输入/消息渲染/进度/confirm 桥接/sidebar
+[POS]: TUI 展示层适配器：布局/输入/流式渲染/进度/confirm 桥接/sidebar/会话管理
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
 from __future__ import annotations
 
 import threading
+import time
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 from textual import events, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal, Vertical, VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
 from textual.message import Message
 from textual.widgets import Footer, Header, Markdown, Static, TextArea
 
 from agent.adapters.tui.commands import AppCommandProvider
+from agent.adapters.tui.sidebar import SidebarPanel
+from agent.adapters.tui.widgets import StreamingMarkdown
 from agent.kernel import Session
 from agent.runtime import KernelBundle
 
@@ -58,6 +62,8 @@ class InvestmentApp(App):
         Binding("ctrl+q", "quit", "退出"),
         Binding("ctrl+p", "command_palette", "命令面板"),
         Binding("ctrl+b", "toggle_sidebar", "侧边栏"),
+        Binding("ctrl+n", "new_session", "新会话"),
+        Binding("escape", "focus_input", "输入", show=False),
     ]
 
     TITLE = "投资助手"
@@ -73,6 +79,9 @@ class InvestmentApp(App):
         self.session = session
         self.keep_last = keep_last
         self._thinking_widget: Static | None = None
+        self._streaming_widget: StreamingMarkdown | None = None
+        self._turn_start: float = 0
+        self._turn_tokens: int = 0
 
     # ── Layout ────────────────────────────────────────────────────────────────
 
@@ -81,16 +90,13 @@ class InvestmentApp(App):
         with Horizontal(id="main"):
             with VerticalScroll(id="chat"):
                 pass
-            with Vertical(id="sidebar"):
-                yield Static("", id="sidebar-title", classes="sidebar-label")
-                yield Static("", id="sidebar-model", classes="sidebar-section")
-                yield Static("", id="sidebar-soul", classes="sidebar-section")
-                yield Static("", id="sidebar-memory", classes="sidebar-section")
+            yield SidebarPanel(self.bundle.workspace, id="sidebar")
         yield ChatInput(id="input")
         yield Footer()
 
     def on_mount(self) -> None:
         self.sub_title = self.bundle.kernel.model
+        self.bundle.kernel.stream = True
         self._wire_events()
         self.bundle.kernel.on_confirm(self._make_confirm())
         self._render_history()
@@ -116,8 +122,11 @@ class InvestmentApp(App):
     def on_user_submitted(self, message: UserSubmitted) -> None:
         text = message.text
         chat = self.query_one("#chat")
-        chat.mount(Static(text, classes="user-msg"))
+        ts = datetime.now().strftime("%H:%M")
+        chat.mount(Static(f"[{ts}]  {text}", classes="user-msg"))
         chat.scroll_end(animate=False)
+        self._turn_start = time.monotonic()
+        self._turn_tokens = 0
         self._run_turn(text)
 
     @work(thread=True)
@@ -127,17 +136,34 @@ class InvestmentApp(App):
 
     def _on_reply(self, reply: str) -> None:
         self._clear_thinking()
+        elapsed_ms = int((time.monotonic() - self._turn_start) * 1000)
+
+        if self._streaming_widget:
+            self._streaming_widget.finalize()
+            self._streaming_widget = None
+        else:
+            self.query_one("#chat").mount(
+                Markdown(reply, classes="assistant-msg"),
+            )
+
+        meta: list[str] = []
+        if self._turn_tokens:
+            meta.append(f"{self._turn_tokens:,} tokens")
+        meta.append(f"{elapsed_ms / 1000:.1f}s")
         chat = self.query_one("#chat")
-        chat.mount(Markdown(reply, classes="assistant-msg"))
+        chat.mount(Static(" · ".join(meta), classes="msg-meta"))
         chat.scroll_end(animate=False)
+
         self.session.prune(keep_last_user_messages=max(1, self.keep_last))
         self.bundle.session_store.save(self.session)
 
-    # ── Progress (kernel event wiring) ────────────────────────────────────────
+    # ── Progress / streaming ──────────────────────────────────────────────────
 
     def _wire_events(self) -> None:
         k = self.bundle.kernel
         k.wire("llm.call.start", self._on_kernel_event)
+        k.wire("llm.chunk", self._on_kernel_event)
+        k.wire("llm.call.done", self._on_kernel_event)
         k.wire("tool.call.start", self._on_kernel_event)
         k.wire("tool.call.done", self._on_kernel_event)
         k.wire("turn.done", self._on_kernel_event)
@@ -152,14 +178,32 @@ class InvestmentApp(App):
 
         if event == "llm.call.start":
             self._show_thinking()
+
+        elif event == "llm.chunk":
+            self._clear_thinking()
+            content = d.get("content", "")
+            if self._streaming_widget is None:
+                self._streaming_widget = StreamingMarkdown(classes="assistant-msg")
+                chat.mount(self._streaming_widget)
+            self._streaming_widget.append(content)
+            chat.scroll_end(animate=False)
+
+        elif event == "llm.call.done":
+            tokens = d.get("total_tokens", 0)
+            if tokens:
+                self._turn_tokens = tokens
+
         elif event == "tool.call.start":
+            self._clear_thinking()
             name = d.get("name", "?")
             chat.mount(Static(f"⚙ {name} ...", classes="tool-status"))
             chat.scroll_end(animate=False)
+
         elif event == "tool.call.done":
             name = d.get("name", "?")
             chat.mount(Static(f"✓ {name}", classes="tool-status"))
             chat.scroll_end(animate=False)
+
         elif event == "turn.done":
             self._clear_thinking()
 
@@ -201,32 +245,8 @@ class InvestmentApp(App):
     # ── Sidebar ───────────────────────────────────────────────────────────────
 
     def _refresh_sidebar(self) -> None:
-        model_info = f"模型: {self.bundle.kernel.model}"
-        history_count = len(self.session.history)
-        msg_count = sum(1 for m in self.session.history if m.get("role") == "user")
-
-        self.query_one("#sidebar-title", Static).update("工作区")
-        self.query_one("#sidebar-model", Static).update(
-            f"{model_info}\n消息: {msg_count} 轮 / {history_count} 条"
-        )
-
-        ws = self.bundle.workspace
-        self.query_one("#sidebar-soul", Static).update(
-            self._read_preview(ws / "soul.md", "soul.md", lines=3)
-        )
-        self.query_one("#sidebar-memory", Static).update(
-            self._read_preview(ws / "memory.md", "memory.md", lines=5)
-        )
-
-    @staticmethod
-    def _read_preview(path: Path, label: str, lines: int) -> str:
-        if not path.exists():
-            return f"[{label}] (空)"
-        text = path.read_text(encoding="utf-8").strip()
-        if not text:
-            return f"[{label}] (空)"
-        preview = "\n".join(text.splitlines()[:lines])
-        return f"── {label} ──\n{preview}"
+        sidebar = self.query_one("#sidebar", SidebarPanel)
+        sidebar.refresh_profile(self.bundle.kernel.model, self.session.history)
 
     def _on_workspace_change(self, event: str, data: object) -> None:
         self.call_from_thread(self._refresh_sidebar)
@@ -234,3 +254,22 @@ class InvestmentApp(App):
     def action_toggle_sidebar(self) -> None:
         sidebar = self.query_one("#sidebar")
         sidebar.display = not sidebar.display
+
+    # ── Session management ────────────────────────────────────────────────────
+
+    def action_new_session(self) -> None:
+        if self.session.history:
+            archive = self.bundle.state / "sessions" / "archive"
+            archive.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.session.save(archive / f"{ts}.json")
+        self.session = Session(session_id=self.session.id)
+        self.query_one("#chat").remove_children()
+        self.bundle.session_store.save(self.session)
+        self._refresh_sidebar()
+        self.notify("已创建新会话")
+
+    # ── Focus ─────────────────────────────────────────────────────────────────
+
+    def action_focus_input(self) -> None:
+        self.query_one("#input").focus()

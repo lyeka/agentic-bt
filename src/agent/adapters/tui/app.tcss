@@ -1,4 +1,6 @@
-/* InvestmentApp — TUI 终端界面样式 */
+/* ── InvestmentApp — TUI 终端界面样式 ── */
+
+/* ── 主布局 ─────────────────────────────── */
 
 #main {
     height: 1fr;
@@ -9,31 +11,25 @@
     padding: 0 1;
 }
 
+/* ── 侧边栏 ─────────────────────────────── */
+
 #sidebar {
     width: 1fr;
     min-width: 24;
     max-width: 40;
     border-left: solid $accent;
-    padding: 1;
+    padding: 1 0 0 0;
 }
 
-#sidebar-title {
-    text-style: bold;
-    margin-bottom: 1;
+#sidebar-tabs {
+    height: 1fr;
 }
 
-.sidebar-section {
-    margin-bottom: 1;
+.sb-section {
+    margin: 0 1 1 1;
 }
 
-.sidebar-label {
-    text-style: bold;
-    color: $text-muted;
-}
-
-.sidebar-content {
-    margin-left: 1;
-}
+/* ── 输入区 ──────────────────────────────── */
 
 #input {
     height: auto;
@@ -42,6 +38,8 @@
     dock: bottom;
     border-top: solid $accent;
 }
+
+/* ── 消息 ────────────────────────────────── */
 
 .user-msg {
     background: $primary-background;
@@ -54,6 +52,16 @@
     padding: 0 1;
     margin: 1 8 0 0;
 }
+
+.msg-meta {
+    color: $text-muted;
+    text-style: dim;
+    padding: 0 1;
+    margin: 0 8 0 0;
+    text-align: right;
+}
+
+/* ── 工具状态 ────────────────────────────── */
 
 .tool-status {
     color: $text-muted;

@@ -7,7 +7,7 @@
 
 ## 成员清单
 `__init__.py`: 包入口
-`kernel.py`: Kernel 核心协调器（ReAct loop + wire/emit 声明式管道 + DataStore + Permission 权限 + boot 自举 + Skill Engine 集成 + /skill 显式展开 + skill_invoke 工具 + _assemble_system_prompt 注入 skills 摘要 + auto-compact 自动上下文压缩 + overflow 溢出重试）；Session 会话容器（持久化 save/load + summary 对话摘要）；DataStore 数据注册表；Permission 枚举；MemoryCompressor Protocol；MEMORY_MAX_CHARS = 100_000；WORKSPACE_GUIDE 元认知框架
+`kernel.py`: Kernel 核心协调器（ReAct loop + _call_llm 统一 LLM 调用（stream/非 stream 双轨）+ wire/emit 声明式管道 + DataStore + Permission 权限 + boot 自举 + Skill Engine 集成 + /skill 显式展开 + skill_invoke 工具 + _assemble_system_prompt 注入 skills 摘要 + auto-compact 自动上下文压缩 + overflow 溢出重试）；Session 会话容器（持久化 save/load + summary 对话摘要）；DataStore 数据注册表；Permission 枚举；MemoryCompressor Protocol；MEMORY_MAX_CHARS = 100_000；WORKSPACE_GUIDE 元认知框架
 `context_ops.py`: 上下文管理纯函数层（estimate_tokens token 估算 + ContextInfo/context_info 统计 + CompactResult/compact_history 对话压缩 + _llm_compress LLM 摘要生成含 fallback）
 `skills.py`: Agent Skills 引擎（目录发现 + SKILL.md/frontmatter 解析 + 校验诊断 + 重名冲突处理 + `<available_skills>` XML 注入文本生成 + `/skill:name` 命令展开 + skill_invoke 载荷构建）
 `runtime.py`: 入口无关的 Kernel 组装层（AgentConfig + KernelBundle + 统一 tools/permissions/wires/trace/session 路径约定 + MARKET_CN/MARKET_US 显式声明数据源 + _make_adapter 工厂 + Composite 异源组装）
@@ -32,10 +32,12 @@
 
 ### adapters/tui/
 `__init__.py`: TUI 终端界面包入口
-`app.py`: InvestmentApp(App) — Textual TUI 主界面（布局/ChatInput/UserSubmitted 消息/worker 线程 kernel.turn/进度事件渲染/confirm 桥接/sidebar 工作区状态）
+`app.py`: InvestmentApp(App) — Textual TUI 主界面（布局/ChatInput/UserSubmitted 消息/worker 线程 kernel.turn/流式渲染 llm.chunk→StreamingMarkdown/进度事件渲染/confirm 桥接/SidebarPanel 多 Tab/会话管理 action_new_session+归档/耗时元数据/Escape 焦点回输入）
+`widgets.py`: StreamingMarkdown(Markdown) — 流式 Markdown 渲染（chunk 累积 + 80ms 防抖 + finalize 终结）
+`sidebar.py`: SidebarPanel(Vertical) — 增强侧边栏（TabbedContent 三 Tab：概况/持仓/行情 + refresh_profile/portfolio/market 方法）
 `screens.py`: ConfirmScreen(ModalScreen) — 文件写入确认对话框（y/n 快捷键 + 按钮）
-`commands.py`: AppCommandProvider(Provider) — 命令面板（重置会话/切换侧边栏/查看状态/退出）
-`app.tcss`: TUI CSS 样式（布局/消息气泡/侧边栏/输入区）
+`commands.py`: AppCommandProvider(Provider) — 命令面板（新建会话/重置会话/切换侧边栏/查看状态/6 主题切换/退出）
+`app.tcss`: TUI CSS 样式（布局/消息气泡/耗时元数据/侧边栏 TabbedContent/输入区）
 
 ### adapters/im/
 `__init__.py`: IM 通用驱动层入口

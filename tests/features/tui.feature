@@ -28,3 +28,19 @@ Feature: TUI 终端界面 — 投资助手交互终端
     Given 一个包含 3 条用户消息的 Session
     When TUI 以该 Session 启动
     Then 聊天区域显示 3 条历史消息
+
+  Scenario: 流式输出逐步渲染
+    Given TUI 使用 Mock Kernel 启动
+    When Kernel 触发 llm.chunk 事件内容为 "你好世界"
+    Then 聊天区域包含流式文本 "你好世界"
+
+  Scenario: 新建会话清空聊天
+    Given TUI 使用 Mock Kernel 启动
+    When 用户输入 "你好"
+    And 用户创建新会话
+    Then 聊天区域为空
+
+  Scenario: 助手回复显示耗时
+    Given TUI 使用 Mock Kernel 启动
+    When 用户输入 "分析"
+    Then 聊天区域包含耗时元数据

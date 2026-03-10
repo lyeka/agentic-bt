@@ -196,6 +196,7 @@ class Kernel:
         self._confirm_handler: Callable[[str], bool] | None = None
         self._skills: dict[str, Skill] = {}
         self._skill_diagnostics: list[dict[str, str]] = []
+        self.stream = False
 
     # ── 自举 ──────────────────────────────────────────────────────────────────
 
@@ -387,6 +388,60 @@ class Kernel:
                 for h in handlers:
                     h(event, data)
 
+    # ── LLM 调用 ─────────────────────────────────────────────────────────────
+
+    def _call_llm(
+        self, kwargs: dict[str, Any], round_num: int,
+    ) -> tuple[dict, str, int]:
+        """执行 LLM 调用（支持流式），返回 (msg_dict, finish_reason, tokens)。"""
+        self.emit("llm.call.start", {"round": round_num})
+
+        if not self.stream:
+            response = self.client.chat.completions.create(**kwargs)
+            choice = response.choices[0]
+            tokens = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
+            return _msg_to_dict(choice.message), choice.finish_reason, tokens
+
+        kwargs = {**kwargs, "stream": True}
+        chunks = self.client.chat.completions.create(**kwargs)
+        parts: list[str] = []
+        tc_acc: dict[int, dict] = {}
+        finish_reason = "stop"
+
+        for chunk in chunks:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if chunk.choices[0].finish_reason:
+                finish_reason = chunk.choices[0].finish_reason
+            if getattr(delta, "content", None):
+                parts.append(delta.content)
+                self.emit("llm.chunk", {"content": delta.content, "round": round_num})
+            if getattr(delta, "tool_calls", None):
+                for tc in delta.tool_calls:
+                    idx = tc.index
+                    if idx not in tc_acc:
+                        tc_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                    if tc.id:
+                        tc_acc[idx]["id"] = tc.id
+                    if tc.function:
+                        if tc.function.name:
+                            tc_acc[idx]["name"] = tc.function.name
+                        if tc.function.arguments:
+                            tc_acc[idx]["arguments"] += tc.function.arguments
+
+        msg: dict[str, Any] = {"role": "assistant", "content": "".join(parts) or None}
+        if tc_acc:
+            msg["tool_calls"] = [
+                {
+                    "id": v["id"],
+                    "type": "function",
+                    "function": {"name": v["name"], "arguments": v["arguments"]},
+                }
+                for v in tc_acc.values()
+            ]
+        return msg, finish_reason, 0
+
     # ── ReAct loop ────────────────────────────────────────────────────────────
 
     def turn(self, user_input: str, session: Session) -> str:
@@ -478,29 +533,24 @@ class Kernel:
             if tool_schemas:
                 kwargs["tools"] = tool_schemas
 
-            self.emit("llm.call.start", {"round": round_num})
-            response = self.client.chat.completions.create(**kwargs)
-            choice = response.choices[0]
-            tokens = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
+            msg, finish_reason, tokens = self._call_llm(kwargs, round_num)
             self.emit(
                 "llm.call.done",
                 {
                     "round": round_num,
-                    "finish_reason": choice.finish_reason,
+                    "finish_reason": finish_reason,
                     "total_tokens": tokens,
                 },
             )
 
-            # 存储 assistant 消息
-            session.history.append(_msg_to_dict(choice.message))
+            session.history.append(msg)
 
-            if choice.finish_reason == "stop":
-                reply = choice.message.content or ""
+            if finish_reason == "stop":
+                reply = msg["content"] or ""
                 break
 
             # 上下文溢出 → 压缩后重试
-            if choice.finish_reason == "length":
-                # 撤销刚添加的截断消息
+            if finish_reason == "length":
                 session.history.pop()
                 result = compact_history(
                     client=self.client, model=self.model,
@@ -532,35 +582,36 @@ class Kernel:
                 continue
 
             # 工具调用
-            if choice.message.tool_calls:
-                for tc in choice.message.tool_calls:
+            if msg.get("tool_calls"):
+                for tc in msg["tool_calls"]:
+                    name = tc["function"]["name"]
                     try:
-                        args = json.loads(tc.function.arguments)
+                        args = json.loads(tc["function"]["arguments"])
                     except json.JSONDecodeError:
                         args = {}
                     self.emit(
                         "tool.call.start",
-                        {"name": tc.function.name, "args": args},
+                        {"name": name, "args": args},
                     )
-                    tool_def = self._tools.get(tc.function.name)
+                    tool_def = self._tools.get(name)
                     if tool_def:
                         try:
                             result = tool_def.handler(args)
                         except Exception as exc:
                             result = {"error": f"{type(exc).__name__}: {exc}"}
-                        self.emit(f"tool:{tc.function.name}", {
+                        self.emit(f"tool:{name}", {
                             "args": args, "result": result,
                         })
                     else:
-                        result = {"error": f"未知工具: {tc.function.name}"}
+                        result = {"error": f"未知工具: {name}"}
                     self.emit(
                         "tool.call.done",
-                        {"name": tc.function.name, "result": result},
+                        {"name": name, "result": result},
                     )
 
                     session.history.append({
                         "role": "tool",
-                        "tool_call_id": tc.id,
+                        "tool_call_id": tc["id"],
                         "content": json.dumps(result, default=str),
                     })
         else:

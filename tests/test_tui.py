@@ -1,7 +1,7 @@
 """
 [INPUT]: pytest-bdd, asyncio, agent.adapters.tui, agent.kernel
 [OUTPUT]: tui.feature step definitions（fixture: tuictx）
-[POS]: tests/ BDD 测试层，验证 TUI 终端界面：消息收发/空输入/确认/进度/历史恢复
+[POS]: tests/ BDD 测试层，验证 TUI 终端界面：消息收发/空输入/确认/进度/历史恢复/流式/会话/元数据
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -47,6 +47,18 @@ def test_tool_progress(): pass
 def test_restore_history(): pass
 
 
+@scenario(FEATURE, "流式输出逐步渲染")
+def test_streaming_output(): pass
+
+
+@scenario(FEATURE, "新建会话清空聊天")
+def test_new_session(): pass
+
+
+@scenario(FEATURE, "助手回复显示耗时")
+def test_reply_meta(): pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Fakes
 # ─────────────────────────────────────────────────────────────────────────────
@@ -57,6 +69,7 @@ class FakeKernel:
         self._confirm_handler = None
         self.turn_calls = 0
         self.model = "test-model"
+        self.stream = False
 
     def wire(self, pattern: str, handler) -> None:
         self._wires[pattern].append(handler)
@@ -111,10 +124,12 @@ def _make_ctx(tmp_path, session=None):
     store = MemorySessionStore(session)
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
+    state = tmp_path / "state"
+    state.mkdir(exist_ok=True)
     bundle = KernelBundle(
         kernel=kernel,
         workspace=workspace,
-        state=tmp_path / "state",
+        state=state,
         session_store=store,
         session_path=tmp_path / "state" / "session.json",
         trace_path=tmp_path / "trace.jsonl",
@@ -169,6 +184,8 @@ def when_user_inputs(tuictx, text):
             await app.workers.wait_for_complete()
             tuictx["results"]["turn_calls"] = tuictx["kernel"].turn_calls
             tuictx["results"]["has_reply"] = bool(app.query(".assistant-msg"))
+            tuictx["results"]["has_meta"] = bool(app.query(".msg-meta"))
+            tuictx["results"]["app"] = app
 
     asyncio.run(_run())
     return tuictx
@@ -247,6 +264,52 @@ def when_tui_starts_with_session(tuictx):
     return tuictx
 
 
+@when(parsers.parse('Kernel 触发 llm.chunk 事件内容为 "{content}"'), target_fixture="tuictx")
+def when_kernel_emits_chunk(tuictx, content):
+    async def _run():
+        app = InvestmentApp(tuictx["bundle"], tuictx["session"])
+        async with app.run_test(size=(100, 30)) as pilot:
+            done = threading.Event()
+
+            def _emit():
+                tuictx["kernel"].emit("llm.chunk", {"content": content, "round": 1})
+                done.set()
+
+            t = threading.Thread(target=_emit)
+            t.start()
+            done.wait(timeout=5)
+            for _ in range(20):
+                await pilot.pause()
+            streaming_widgets = app.query(".assistant-msg")
+            tuictx["results"]["streaming_texts"] = [
+                w.full_text if hasattr(w, "full_text") else ""
+                for w in streaming_widgets
+            ]
+
+    asyncio.run(_run())
+    return tuictx
+
+
+@when("用户创建新会话", target_fixture="tuictx")
+def when_user_creates_new_session(tuictx):
+    async def _run():
+        app = InvestmentApp(tuictx["bundle"], tuictx["session"])
+        async with app.run_test(size=(100, 30)) as pilot:
+            text_area = app.query_one("#input", ChatInput)
+            text_area.focus()
+            text_area.insert("你好")
+            await pilot.pause()
+            text_area.action_submit()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            app.action_new_session()
+            await pilot.pause()
+            tuictx["results"]["chat_children"] = len(app.query_one("#chat").children)
+
+    asyncio.run(_run())
+    return tuictx
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Then
 # ─────────────────────────────────────────────────────────────────────────────
@@ -282,3 +345,19 @@ def then_chat_has_progress(tuictx, text):
 @then(parsers.parse("聊天区域显示 {count:d} 条历史消息"))
 def then_chat_shows_history(tuictx, count):
     assert tuictx["results"]["user_msg_count"] == count
+
+
+@then(parsers.parse('聊天区域包含流式文本 "{text}"'))
+def then_chat_has_streaming_text(tuictx, text):
+    texts = tuictx["results"].get("streaming_texts", [])
+    assert any(text in t for t in texts), f"Expected '{text}' in {texts}"
+
+
+@then("聊天区域为空")
+def then_chat_is_empty(tuictx):
+    assert tuictx["results"]["chat_children"] == 0
+
+
+@then("聊天区域包含耗时元数据")
+def then_chat_has_meta(tuictx):
+    assert tuictx["results"]["has_meta"]

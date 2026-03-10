@@ -53,5 +53,7 @@
 `test_web_tools.py`: web_tools.feature step definitions（fixture: wctx，MockSearchAdapter + patch _fetch_url）
 `features/context_ops.feature`: 上下文管理行为规格（7 scenarios：token估算/统计/短历史不压缩/压缩返回摘要/保留原样/结构化摘要）
 `test_context_ops.py`: context_ops.feature step definitions（fixture: coctx，mock LLM client）
+`features/tui.feature`: TUI 终端界面行为规格（8 scenarios：消息收发/空输入/确认对话框/工具进度/历史恢复/流式输出/新建会话/耗时元数据）
+`test_tui.py`: tui.feature step definitions（fixture: tuictx，FakeKernel + MemorySessionStore + Textual app.run_test）
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
