@@ -70,7 +70,6 @@ def _simple_repl(
     kernel: Any,
     session: Session,
     store: SessionStore,
-    bundle: Any,
 ) -> None:
     """纯文本交互循环（无 TUI 依赖）。"""
     while True:
@@ -173,7 +172,7 @@ def _run_simple(config: AgentConfig, bundle: Any) -> None:
     print(f"投资助手已启动 | 模型: {config.model} | trace → {bundle.trace_path}")
     print("输入 quit 退出")
     try:
-        _simple_repl(kernel, session, bundle.session_store, config.session_keep_last_user_messages)
+        _simple_repl(kernel, session, bundle.session_store)
     finally:
         bundle.session_store.save(session)
 

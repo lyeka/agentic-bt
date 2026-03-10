@@ -108,6 +108,21 @@ class Session:
         session.repair()
         return session
 
+    def prune(self, keep_last_user_messages: int = 20) -> None:
+        """保留最近 N 轮 user 消息及其后续内容，裁剪更早的历史"""
+        if keep_last_user_messages <= 0 or not self.history:
+            return
+        user_count = 0
+        cut = 0
+        for i in range(len(self.history) - 1, -1, -1):
+            if self.history[i].get("role") == "user":
+                user_count += 1
+                if user_count >= keep_last_user_messages:
+                    cut = i
+                    break
+        if cut > 0:
+            self.history = self.history[cut:]
+
     def repair(self) -> None:
         """修复残缺历史：移除末尾缺少 tool response 的 assistant 消息"""
         if not self.history:

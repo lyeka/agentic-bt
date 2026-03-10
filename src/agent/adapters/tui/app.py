@@ -108,6 +108,8 @@ class InvestmentApp(App):
                 chat.mount(Static(content, classes="user-msg"))
             elif role == "assistant" and content:
                 chat.mount(Markdown(content, classes="assistant-msg"))
+        if self.session.history:
+            self.call_after_refresh(chat.scroll_end, animate=False)
 
     # ── Input handling ────────────────────────────────────────────────────────
 
