@@ -69,3 +69,22 @@ Feature: Kernel — 持久投资助手核心协调器
     Given 一个 Kernel
     When 用户说 "今天涨了吗"
     Then Session 历史中用户消息包含日期前缀
+
+  Scenario: token 超限时自动压缩
+    Given 一个 context_window 极小的 Kernel
+    And 已有大量历史消息
+    When 用户说 "继续"
+    Then 触发 auto compact 事件
+    And Session 历史消息数少于压缩前
+
+  Scenario: finish_reason 为 length 时压缩重试
+    Given 一个 Kernel
+    And LLM 先返回 length 再返回正常回复
+    When 用户说 "测试溢出"
+    Then 触发 overflow compact 事件
+    And 返回非空回复
+
+  Scenario: Session 持久化包含 summary
+    Given 一个 Kernel
+    When 设置 summary 并保存 Session
+    Then 加载的 Session 包含 summary

@@ -26,7 +26,7 @@
 `test_tracer.py`: tracer.feature step definitions（fixture: trcx）
 `test_compute.py`: compute.feature step definitions（fixture: cptx）
 `test_e2e_strategies.py`: E2E 策略自动化测试（参数化 5 mock + 2 LLM-only 验证）
-`features/kernel.feature`: Kernel 核心协调器行为规格（9 scenarios：对话/历史/ReAct/管道/最大轮次/boot soul+workspace指南/soul刷新/workspace指南/memory不进prompt）
+`features/kernel.feature`: Kernel 核心协调器行为规格（13 scenarios：对话/历史/ReAct/管道/最大轮次/boot soul+workspace指南/soul刷新/workspace指南/memory不进prompt/日期注入/auto-compact/overflow-compact/session-summary）
 `features/memory_compress.feature`: Memory 自动压缩行为规格（3 scenarios：超限触发/未超限/markdown格式）
 `test_kernel.py`: kernel.feature step definitions（fixture: kctx，Mock LLM）
 `test_memory_compress.py`: memory_compress.feature step definitions（fixture: mcctx，mock LLM 压缩）
@@ -38,12 +38,12 @@
 `test_agent_tools.py`: agent_tools.feature step definitions（fixture: atx，MockKernel + 双信任区域）
 `features/skills.feature`: Skill Engine 行为规格（6 scenarios：发现/注入/显式展开/disable-model-invocation/模型自主 skill_invoke）
 `test_skills.py`: skills.feature step definitions（fixture: sctx，Mock LLM + skill 临时目录）
-`features/im_driver.feature`: IM 通用驱动行为规格（5 scenarios：鉴权/进度状态/确认交互/会话持久化/默认隐藏过程消息）
+`features/im_driver.feature`: IM 通用驱动行为规格（9 scenarios：鉴权/进度状态/确认交互/会话持久化/默认隐藏过程消息/new命令/reset别名/context统计/compact压缩）
 `test_im_driver.py`: im_driver.feature step definitions（fixture: imctx，FakeBackend + FakeKernel + bundle_factory）
 `test_telegram_adapter.py`: Telegram 适配器 helper 单测（allowlist/bool/render_mode 解析 + markdown->HTML 渲染）
 `features/web_tools.feature`: Web 工具行为规格（9 scenarios：web_search 结构化结果/域名过滤/上限/失败；web_fetch 内容/截断/无效URL/网络错误；条件注册）
 `test_web_tools.py`: web_tools.feature step definitions（fixture: wctx，MockSearchAdapter + patch _fetch_url）
-`features/tui.feature`: TUI 终端界面行为规格（5 scenarios：消息收发/空输入/确认对话框/工具进度/历史恢复）
-`test_tui.py`: tui.feature step definitions（fixture: tuictx，FakeKernel + Textual Pilot API）
+`features/context_ops.feature`: 上下文管理行为规格（7 scenarios：token估算/统计/短历史不压缩/压缩返回摘要/保留原样/结构化摘要）
+`test_context_ops.py`: context_ops.feature step definitions（fixture: coctx，mock LLM client）
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

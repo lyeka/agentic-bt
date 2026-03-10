@@ -50,6 +50,15 @@ def test_memory_not_in_prompt(): pass
 @scenario("features/kernel.feature", "turn 在 user 消息中注入当前日期")
 def test_turn_date_injection(): pass
 
+@scenario("features/kernel.feature", "token 超限时自动压缩")
+def test_auto_compact(): pass
+
+@scenario("features/kernel.feature", "finish_reason 为 length 时压缩重试")
+def test_overflow_compact(): pass
+
+@scenario("features/kernel.feature", "Session 持久化包含 summary")
+def test_session_summary_persist(): pass
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -271,3 +280,82 @@ def then_user_message_has_date(kctx):
     import re
     user_msg = kctx["session"].history[0]["content"]
     assert re.match(r"\[\d{4}-\d{2}-\d{2}\]\n", user_msg)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Auto-compact / Overflow / Session summary
+# ─────────────────────────────────────────────────────────────────────────────
+
+@given("一个 context_window 极小的 Kernel", target_fixture="kctx")
+def given_tiny_context_kernel(kctx):
+    kernel = Kernel(context_window=200, compact_recent_turns=1)
+    kctx["kernel"] = kernel
+    kctx["session"] = Session()
+    kctx["events"] = []
+    kernel.wire("context.*", lambda e, d: kctx["events"].append((e, d)))
+    # compact_history 调用 LLM 做压缩（1次） + turn 本身的 LLM 调用（1次）
+    kctx["responses"] = [
+        _mock_response("stop", content="压缩摘要"),  # compact LLM
+        _mock_response("stop", content="ok"),          # turn LLM
+    ]
+    return kctx
+
+
+@given("已有大量历史消息", target_fixture="kctx")
+def given_large_history(kctx):
+    for i in range(20):
+        kctx["session"].history.append({"role": "user", "content": f"msg{i} " * 50})
+        kctx["session"].history.append({"role": "assistant", "content": f"reply{i} " * 50})
+    kctx["history_count_before"] = len(kctx["session"].history)
+    return kctx
+
+
+@then("触发 auto compact 事件")
+def then_auto_compact_event(kctx):
+    events = kctx.get("events", [])
+    assert any(e == "context.compacted" and d.get("trigger") == "auto" for e, d in events)
+
+
+@then("Session 历史消息数少于压缩前")
+def then_session_smaller(kctx):
+    assert len(kctx["session"].history) < kctx["history_count_before"]
+
+
+@given("LLM 先返回 length 再返回正常回复", target_fixture="kctx")
+def given_llm_length_then_stop(kctx):
+    kctx["kernel"] = Kernel()
+    kctx["session"] = Session()
+    kctx["events"] = []
+    kctx["kernel"].wire("context.*", lambda e, d: kctx["events"].append((e, d)))
+    # 先填充一些历史
+    for i in range(5):
+        kctx["session"].history.append({"role": "user", "content": f"history{i}"})
+        kctx["session"].history.append({"role": "assistant", "content": f"reply{i}"})
+    kctx["responses"] = [
+        _mock_response("length", content="截断..."),   # turn round 1 → overflow
+        _mock_response("stop", content="压缩摘要"),     # compact LLM
+        _mock_response("stop", content="重试成功"),     # turn round 2 → stop
+    ]
+    return kctx
+
+
+@then("触发 overflow compact 事件")
+def then_overflow_compact_event(kctx):
+    events = kctx.get("events", [])
+    assert any(e == "context.compacted" and d.get("trigger") == "overflow" for e, d in events)
+
+
+@when("设置 summary 并保存 Session", target_fixture="kctx")
+def when_set_summary_and_save(kctx, tmp_path):
+    session = kctx["session"]
+    session.summary = "## 会话意图\n测试持久化"
+    path = tmp_path / "session.json"
+    session.save(path)
+    kctx["session_path"] = path
+    return kctx
+
+
+@then("加载的 Session 包含 summary")
+def then_loaded_session_has_summary(kctx):
+    loaded = Session.load(kctx["session_path"])
+    assert loaded.summary == "## 会话意图\n测试持久化"

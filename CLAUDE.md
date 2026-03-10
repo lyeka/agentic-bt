@@ -28,7 +28,7 @@ pyproject.toml - Python 包配置（venv: .venv/）
 docs/ - 完整设计文档集 (13 文件: agent-design, architecture, engine, tools, compute, memory, context, eval, agent-protocol, runner, tracer, roadmap, skills)
 src/core/ - 公共基础包 (4 文件: __init__, sandbox, indicators, tracer)
 src/agenticbt/ - 回测框架 (13 文件: __init__, models, engine, indicators, memory, tools, sandbox, context, agent, runner, eval, data, tracer)
-src/agent/ - 持久投资助手（Kernel + runtime + session_store + tools + adapters: cli/tui/telegram/im）
+src/agent/ - 持久投资助手（Kernel + context_ops + runtime + session_store + tools + adapters: cli/telegram/im）
 scripts/ - 分析脚本 (1 文件: analyze_trace)
 examples/ - 策略模块 (2 文件: __init__, strategies)
 tests/ - BDD 测试 + E2E（18 features + 19 test_*.py step definitions/e2e + conftest）
@@ -170,7 +170,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-230 tests 全绿。agent 持久投资助手 Phase 2（runtime 统一组装 + SessionStore + IMDriver + Telegram + TUI Textual 终端界面）。CLI 默认启动 Textual TUI（Markdown 渲染/进度/确认对话框/命令面板/侧边栏），--simple 回退纯文本 REPL。agenticbt 回测框架完成。
+239 tests 全绿。agent 持久投资助手进入 Phase 2（runtime 统一组装 + SessionStore + IMDriver + Telegram polling 入口 + 会话上下文管理：auto-compact/overflow recovery/手动 compact/context 统计）。agenticbt 回测框架完成（确定性引擎 + 多资产 + bracket/limit/stop + 风控 + 11 工具）。项目重心继续在 Phase 2（Discord/Webhook/流式输出/定时任务）。
 路线图：docs/roadmap.md
 
 # currentDate

@@ -1,6 +1,6 @@
 """
 [INPUT]: openai, json, pathlib, enum, agent.skills
-[OUTPUT]: Kernel — 核心协调器；Session — 会话容器；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；skill_invoke
+[OUTPUT]: Kernel — 核心协调器；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；skill_invoke
 [POS]: agent 包核心，系统唯一协调中心：ReAct loop + 声明式 wire/emit + DataStore + 权限 + 自举 + Skill Engine
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -81,26 +81,30 @@ class Permission(Enum):
 # ─────────────────────────────────────────────────────────────────────────────
 
 class Session:
-    """会话容器 — 维护完整消息历史 + 持久化"""
+    """会话容器 — 维护完整消息历史 + 对话摘要 + 持久化"""
 
     def __init__(self, session_id: str = "default") -> None:
         self.id = session_id
         self.history: list[dict] = []
+        self.summary: str | None = None
 
     def save(self, path: Path) -> None:
         """持久化到 JSON"""
         path.parent.mkdir(parents=True, exist_ok=True)
+        data: dict = {"id": self.id, "history": self.history}
+        if self.summary:
+            data["summary"] = self.summary
         path.write_text(json.dumps(
-            {"id": self.id, "history": self.history},
-            ensure_ascii=False, indent=2,
+            data, ensure_ascii=False, indent=2,
         ), encoding="utf-8")
 
     @classmethod
     def load(cls, path: Path) -> Session:
-        """从 JSON 恢复（自动修复残缺历史）"""
+        """从 JSON 恢复（自动修复残缺历史，兼容旧格式无 summary）"""
         data = json.loads(path.read_text(encoding="utf-8"))
         session = cls(session_id=data["id"])
         session.history = data["history"]
+        session.summary = data.get("summary")
         session.repair()
         return session
 
@@ -113,23 +117,6 @@ class Session:
             return
         # assistant 有 tool_calls 但后面没有 tool response → 截断
         self.history.pop()
-
-    def prune(self, *, keep_last_user_messages: int) -> None:
-        """
-        裁剪历史，避免无限增长。
-
-        保留倒数 N 条 user 消息及其之后的所有消息（assistant/tool）。
-        """
-        keep = max(1, int(keep_last_user_messages))
-        user_idxs = [
-            i
-            for i, msg in enumerate(self.history)
-            if msg.get("role") == "user"
-        ]
-        if len(user_idxs) <= keep:
-            return
-        cut = user_idxs[-keep]
-        self.history = self.history[cut:]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -174,9 +161,13 @@ class Kernel:
         base_url: str | None = None,
         api_key: str | None = None,
         max_rounds: int = 15,
+        context_window: int = 100_000,
+        compact_recent_turns: int = 3,
     ) -> None:
         self.model = model
         self.max_rounds = max_rounds
+        self.context_window = context_window
+        self.compact_recent_turns = compact_recent_turns
         self.client = openai.OpenAI(
             base_url=base_url,
             api_key=api_key or "dummy",
@@ -408,10 +399,58 @@ class Kernel:
             self.emit("skill.expanded", {"input": user_input, "skill": skill_name})
 
         tool_schemas = [t.schema for t in self._tools.values()] or None
+
+        # prefix: system prompt + 对话摘要注入
+        system_content = self._system_prompt or ""
+        if session.summary:
+            system_content += (
+                "\n\n## 前段对话摘要\n"
+                "以下是之前对话的压缩摘要，不是新消息。基于此背景继续对话：\n\n"
+                f"{session.summary}"
+            )
         prefix = (
-            [{"role": "system", "content": self._system_prompt}]
-            if self._system_prompt else []
+            [{"role": "system", "content": system_content}]
+            if system_content else []
         )
+
+        # 自动压缩：token > 75% context window 时触发
+        from agent.context_ops import estimate_tokens, compact_history
+
+        est = estimate_tokens(prefix + session.history)
+        if est > int(self.context_window * 0.75):
+            result = compact_history(
+                client=self.client, model=self.model,
+                history=session.history, recent_turns=self.compact_recent_turns,
+            )
+            session.history = result.retained
+            if result.summary:
+                session.summary = (
+                    f"{session.summary}\n\n{result.summary}" if session.summary else result.summary
+                )
+            self.emit("context.compacted", {
+                "trigger": "auto",
+                "messages_before": result.compressed_count + result.retained_count,
+                "messages_after": result.retained_count,
+                "messages_compressed": result.compressed_count,
+                "messages_retained": result.retained_count,
+                "tokens_before": est,
+                "tokens_after": estimate_tokens(prefix + session.history),
+                "summary_chars": len(result.summary),
+                "summary": result.summary,
+            })
+            # 重建 prefix（摘要可能已变）
+            system_content = self._system_prompt or ""
+            if session.summary:
+                system_content += (
+                    "\n\n## 前段对话摘要\n"
+                    "以下是之前对话的压缩摘要，不是新消息。基于此背景继续对话：\n\n"
+                    f"{session.summary}"
+                )
+            prefix = (
+                [{"role": "system", "content": system_content}]
+                if system_content else []
+            )
+
         reply = ""
 
         for i in range(self.max_rounds):
@@ -443,6 +482,39 @@ class Kernel:
             if choice.finish_reason == "stop":
                 reply = choice.message.content or ""
                 break
+
+            # 上下文溢出 → 压缩后重试
+            if choice.finish_reason == "length":
+                # 撤销刚添加的截断消息
+                session.history.pop()
+                result = compact_history(
+                    client=self.client, model=self.model,
+                    history=session.history, recent_turns=self.compact_recent_turns,
+                )
+                session.history = result.retained
+                if result.summary:
+                    session.summary = (
+                        f"{session.summary}\n\n{result.summary}" if session.summary else result.summary
+                    )
+                self.emit("context.compacted", {
+                    "trigger": "overflow",
+                    "messages_compressed": result.compressed_count,
+                    "messages_retained": result.retained_count,
+                    "summary": result.summary,
+                })
+                # 重建 prefix
+                system_content = self._system_prompt or ""
+                if session.summary:
+                    system_content += (
+                        "\n\n## 前段对话摘要\n"
+                        "以下是之前对话的压缩摘要，不是新消息。基于此背景继续对话：\n\n"
+                        f"{session.summary}"
+                    )
+                prefix = (
+                    [{"role": "system", "content": system_content}]
+                    if system_content else []
+                )
+                continue
 
             # 工具调用
             if choice.message.tool_calls:

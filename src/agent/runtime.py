@@ -29,7 +29,8 @@ class AgentConfig:
     workspace_dir: Path
     state_dir: Path
     enable_bash: bool = True
-    session_keep_last_user_messages: int = 20
+    context_window: int = 100_000
+    compact_recent_turns: int = 3
     search_provider: str = "tavily"
     tavily_api_key: str | None = None
 
@@ -42,7 +43,8 @@ class AgentConfig:
         workspace_dir = Path(os.getenv("WORKSPACE", "~/.agent/workspace")).expanduser()
         state_dir = Path(os.getenv("STATE_DIR", "~/.agent/state")).expanduser()
         enable_bash = os.getenv("ENABLE_BASH", "1").strip().lower() not in ("0", "false", "no", "n")
-        keep = int(os.getenv("SESSION_KEEP_LAST_USER_MESSAGES", "20"))
+        context_window = int(os.getenv("CONTEXT_WINDOW", "100000"))
+        compact_recent_turns = int(os.getenv("COMPACT_RECENT_TURNS", "3"))
         search_provider = os.getenv("SEARCH_PROVIDER", "tavily")
         tavily_api_key = os.getenv("TAVILY_API_KEY") or None
         return cls(
@@ -53,7 +55,8 @@ class AgentConfig:
             workspace_dir=workspace_dir,
             state_dir=state_dir,
             enable_bash=enable_bash,
-            session_keep_last_user_messages=keep,
+            context_window=context_window,
+            compact_recent_turns=compact_recent_turns,
             search_provider=search_provider,
             tavily_api_key=tavily_api_key,
         )
@@ -109,6 +112,7 @@ def _wire_trace(kernel: Kernel, trace_path: Path) -> None:
     kernel.wire("llm.*", _append)
     kernel.wire("tool.*", _append)
     kernel.wire("memory.compressed", _append)
+    kernel.wire("context.*", _append)
 
 
 def _on_memory_write(kernel: Kernel, workspace: Path, compressor: LLMCompressor) -> None:
@@ -148,7 +152,10 @@ def build_kernel_bundle(
     workspace.mkdir(parents=True, exist_ok=True)
     state.mkdir(parents=True, exist_ok=True)
 
-    kernel = Kernel(model=config.model, base_url=config.base_url, api_key=config.api_key)
+    kernel = Kernel(
+        model=config.model, base_url=config.base_url, api_key=config.api_key,
+        context_window=config.context_window, compact_recent_turns=config.compact_recent_turns,
+    )
 
     # tools
     if config.tushare_token:

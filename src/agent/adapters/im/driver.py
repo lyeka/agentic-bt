@@ -193,9 +193,7 @@ class IMDriver:
                     except asyncio.CancelledError:
                         pass
 
-            # session prune + persist
-            keep = max(1, int(self._config.session_keep_last_user_messages))
-            chat.session.prune(keep_last_user_messages=keep)
+            # session persist
             chat.bundle.session_store.save(chat.session)
 
             # finalize status
@@ -217,22 +215,70 @@ class IMDriver:
 
     async def _handle_command(self, chat: ChatState, text: str) -> None:
         cmd = text.strip().split()[0].lower()
+
         if cmd in ("/start", "/help"):
             await self._backend.send_text(
                 chat.conversation_id,
                 (
                     "投资助手已接入 IM。\n"
-                    "可用命令: /start /help /reset /status\n"
+                    "可用命令: /start /help /new /reset /compact /context /status\n"
                     "直接发送文本开始对话。"
                 ),
             )
             return
 
-        if cmd == "/reset":
-            # 只清空 session，不动 workspace
+        if cmd in ("/new", "/reset"):
             chat.session = Session(session_id=chat.session.id)
             chat.bundle.session_store.save(chat.session)
-            await self._backend.send_text(chat.conversation_id, "已重置会话。")
+            await self._backend.send_text(chat.conversation_id, "已开始新会话。")
+            return
+
+        if cmd == "/compact":
+            from agent.context_ops import compact_history, estimate_tokens
+
+            before_tokens = estimate_tokens(chat.session.history)
+            result = compact_history(
+                client=chat.bundle.kernel.client,
+                model=self._config.model,
+                history=chat.session.history,
+            )
+            chat.session.history = result.retained
+            if result.summary:
+                chat.session.summary = (
+                    f"{chat.session.summary}\n\n{result.summary}"
+                    if chat.session.summary else result.summary
+                )
+            after_tokens = estimate_tokens(chat.session.history)
+            chat.bundle.session_store.save(chat.session)
+            chat.bundle.kernel.emit("context.compacted", {
+                "trigger": "manual",
+                "messages_compressed": result.compressed_count,
+                "messages_retained": result.retained_count,
+                "tokens_before": before_tokens,
+                "tokens_after": after_tokens,
+                "summary": result.summary,
+            })
+            await self._backend.send_text(
+                chat.conversation_id,
+                f"已压缩上下文。\n"
+                f"消息: {result.compressed_count + result.retained_count} → {result.retained_count}\n"
+                f"Token 估算: ~{before_tokens} → ~{after_tokens}",
+            )
+            return
+
+        if cmd == "/context":
+            from agent.context_ops import context_info
+
+            info = context_info(chat.session.history, self._config.context_window)
+            await self._backend.send_text(
+                chat.conversation_id,
+                (
+                    f"消息数: {info.message_count}（user: {info.user_message_count}）\n"
+                    f"估算 Token: ~{info.estimated_tokens}\n"
+                    f"Context Window: {info.context_window}\n"
+                    f"使用率: {info.usage_pct}%"
+                ),
+            )
             return
 
         if cmd == "/status":
@@ -249,7 +295,10 @@ class IMDriver:
             )
             return
 
-        await self._backend.send_text(chat.conversation_id, "未知命令。可用: /start /help /reset /status")
+        await self._backend.send_text(
+            chat.conversation_id,
+            "未知命令。可用: /start /help /new /reset /compact /context /status",
+        )
 
     async def _get_or_create_chat(self, conversation_id: str) -> ChatState:
         existing = self._chats.get(conversation_id)

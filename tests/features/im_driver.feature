@@ -33,3 +33,24 @@ Feature: IM Driver — 渠道无关交互层
     Then backend 不发送状态消息
     And backend 不编辑状态消息
     And backend 发送最终回复 "reply:hi"
+
+  Scenario: /new 命令清空会话
+    When 用户 "u1" 在会话 "c5" 发送 "hi"
+    And 用户 "u1" 在会话 "c5" 发送 "/new"
+    Then backend 发送新会话提示
+    And 会话 "c5" 历史为空
+
+  Scenario: /reset 作为 /new 别名
+    When 用户 "u1" 在会话 "c6" 发送 "hi"
+    And 用户 "u1" 在会话 "c6" 发送 "/reset"
+    Then backend 发送新会话提示
+
+  Scenario: /context 显示统计信息
+    When 用户 "u1" 在会话 "c7" 发送 "hi"
+    And 用户 "u1" 在会话 "c7" 发送 "/context"
+    Then backend 发送包含 "消息" 的文本
+
+  Scenario: /compact 压缩上下文
+    When 用户 "u1" 在会话 "c8" 发送 "hi"
+    And 用户 "u1" 在会话 "c8" 发送 "/compact"
+    Then backend 发送包含 "压缩" 的文本

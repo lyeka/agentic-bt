@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
+from types import SimpleNamespace
 
 from pytest_bdd import given, parsers, scenario, then, when
 
@@ -45,11 +46,37 @@ def test_confirm_delegates_to_backend(): pass
 def test_default_hide_process_messages(): pass
 
 
+@scenario(FEATURE, "/new 命令清空会话")
+def test_new_command(): pass
+
+
+@scenario(FEATURE, "/reset 作为 /new 别名")
+def test_reset_alias(): pass
+
+
+@scenario(FEATURE, "/context 显示统计信息")
+def test_context_command(): pass
+
+
+@scenario(FEATURE, "/compact 压缩上下文")
+def test_compact_command(): pass
+
+
 class FakeKernel:
     def __init__(self) -> None:
         self._wires: dict[str, list] = defaultdict(list)
         self._confirm_handler = None
         self.turn_calls = 0
+        # mock client for compact_history
+        self.client = SimpleNamespace(
+            chat=SimpleNamespace(
+                completions=SimpleNamespace(
+                    create=lambda **_: SimpleNamespace(
+                        choices=[SimpleNamespace(message=SimpleNamespace(content="## 会话意图\n压缩摘要"))],
+                    ),
+                ),
+            ),
+        )
 
     def wire(self, pattern: str, handler) -> None:
         self._wires[pattern].append(handler)
@@ -141,7 +168,6 @@ def given_backend(tmp_path):
         workspace_dir=tmp_path / "workspace",
         state_dir=tmp_path / "state",
         enable_bash=False,
-        session_keep_last_user_messages=20,
     )
 
     kernels: dict[str, FakeKernel] = {}
@@ -290,3 +316,29 @@ def then_backend_not_sent_status(imctx):
 @then("backend 不编辑状态消息")
 def then_backend_not_edited_status(imctx):
     assert len(imctx["backend"].edited) == 0
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 新命令 Then
+# ─────────────────────────────────────────────────────────────────────────────
+
+@then("backend 发送新会话提示")
+def then_backend_sent_new_session(imctx):
+    texts = [t for _cid, t in imctx["backend"].sent]
+    assert any("新会话" in t for t in texts)
+
+
+@then(parsers.parse('会话 "{conv}" 历史为空'))
+def then_session_history_empty(imctx, conv):
+    store = imctx["stores"].get(conv)
+    assert store is not None
+    # 检查最后保存的 session 历史为空
+    assert len(store.saved) > 0
+    last_saved = store.saved[-1]
+    assert len(last_saved.history) == 0
+
+
+@then(parsers.parse('backend 发送包含 "{needle}" 的文本'))
+def then_backend_sent_text_containing(imctx, needle):
+    texts = [t for _cid, t in imctx["backend"].sent]
+    assert any(needle in t for t in texts), f"未找到包含 '{needle}' 的消息，所有消息: {texts}"

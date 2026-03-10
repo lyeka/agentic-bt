@@ -7,7 +7,8 @@
 
 ## 成员清单
 `__init__.py`: 包入口
-`kernel.py`: Kernel 核心协调器（ReAct loop + wire/emit 声明式管道 + DataStore + Permission 权限 + boot 自举 + Skill Engine 集成 + /skill 显式展开 + skill_invoke 工具 + _assemble_system_prompt 注入 skills 摘要）；Session 会话容器（持久化 save/load + prune）；DataStore 数据注册表；Permission 枚举；MemoryCompressor Protocol；MEMORY_MAX_CHARS = 100_000；WORKSPACE_GUIDE 元认知框架
+`kernel.py`: Kernel 核心协调器（ReAct loop + wire/emit 声明式管道 + DataStore + Permission 权限 + boot 自举 + Skill Engine 集成 + /skill 显式展开 + skill_invoke 工具 + _assemble_system_prompt 注入 skills 摘要 + auto-compact 自动上下文压缩 + overflow 溢出重试）；Session 会话容器（持久化 save/load + summary 对话摘要）；DataStore 数据注册表；Permission 枚举；MemoryCompressor Protocol；MEMORY_MAX_CHARS = 100_000；WORKSPACE_GUIDE 元认知框架
+`context_ops.py`: 上下文管理纯函数层（estimate_tokens token 估算 + ContextInfo/context_info 统计 + CompactResult/compact_history 对话压缩 + _llm_compress LLM 摘要生成含 fallback）
 `skills.py`: Agent Skills 引擎（目录发现 + SKILL.md/frontmatter 解析 + 校验诊断 + 重名冲突处理 + `<available_skills>` XML 注入文本生成 + `/skill:name` 命令展开 + skill_invoke 载荷构建）
 `runtime.py`: 入口无关的 Kernel 组装层（AgentConfig + KernelBundle + 统一 tools/permissions/wires/trace/session 路径约定）
 `session_store.py`: SessionStore 抽象 + JsonSessionStore（兼容旧格式 + 原子写）
@@ -26,7 +27,7 @@
 
 ### adapters/
 `__init__.py`: 适配器层入口
-`cli.py`: CLI 入口（dotenv + runtime 组装 + 默认启动 TUI + --simple 回退纯文本 REPL）
+`cli.py`: CLI REPL 入口（dotenv + runtime 统一组装 + state_dir Session 持久化 + 旧会话迁移 + /new /compact /context /help 命令路由）
 `telegram.py`: Telegram Bot 入口（polling + allowlist + InboundMessage 映射 + IMDriver 驱动 + markdown->HTML 基础渲染 + 过程消息开关）
 
 ### adapters/tui/
@@ -39,7 +40,7 @@
 ### adapters/im/
 `__init__.py`: IM 通用驱动层入口
 `backend.py`: IMBackend 协议 + InboundMessage/OutboundRef（平台抽象）
-`driver.py`: IMDriver（鉴权/命令路由/并发锁/进度状态更新/confirm 桥接/session 落盘）
+`driver.py`: IMDriver（鉴权/命令路由 /new /reset /compact /context /status /help/并发锁/进度状态更新/confirm 桥接/session 落盘）
 `confirm_bridge.py`: async confirm -> sync bool 桥接（给 Kernel.on_confirm）
 `progress.py`: 进度缓冲与渲染（状态消息行聚合）
 
