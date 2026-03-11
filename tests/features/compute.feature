@@ -164,3 +164,13 @@ Feature: compute — 沙箱化 Python 计算工具
   Scenario: latest 对 bbands 返回值安全调用
     When 调用 compute bbands 后对返回值调用 latest
     Then compute 无错误返回
+
+  # ── exec scoping 修复 ──
+
+  Scenario: 用户定义函数可互相调用
+    When 调用 compute 定义两个互调函数
+    Then compute 返回正确函数互调结果
+
+  Scenario: strftime 不触发 import 错误
+    When 调用 compute 日期格式化 strftime
+    Then compute 返回日期字符串

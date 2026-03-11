@@ -161,3 +161,19 @@ Feature: Sub-Agent 子代理系统
     When Kernel 使用该 subagent 根目录启动
     Then kernel system prompt 包含 "<team>"
     And kernel system prompt 包含 "coder"
+
+  # ── 内置子代理 ──
+
+  Scenario: 从项目目录加载内置 technician 子代理
+    Given 项目 subagent 目录包含 "technician" 定义文件
+    When 加载项目 subagent 文件
+    Then 加载结果包含 "technician"
+    And "technician" 的工具白名单为 "market_ohlcv" 和 "compute"
+    And "technician" 的 token_budget 为 40000
+
+  Scenario: 从项目目录加载内置 researcher 子代理
+    Given 项目 subagent 目录包含 "researcher" 定义文件
+    When 加载项目 subagent 文件
+    Then 加载结果包含 "researcher"
+    And "researcher" 的工具白名单为 "web_search" 和 "web_fetch"
+    And "researcher" 的 token_budget 为 50000

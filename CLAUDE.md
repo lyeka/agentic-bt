@@ -16,6 +16,9 @@ src/
   core/        - 公共基础包 (4 文件: sandbox/indicators/tracer)
   agenticbt/   - 回测框架 (13 文件，import core/)
   agent/       - 持久投资助手 (Phase 2 进行中: runtime + session_store + IM driver + Telegram adapter)
+.agents/
+  skills/      - Agent 技能定义文件
+  subagents/   - 内置子代理定义 (technician 技术分析 + researcher 信息研究)
 scripts/       - 分析脚本 (trace 分析报告)
 examples/      - 策略注册表 + Mock Agent + LLM Prompt（8 策略）
 tests/
@@ -29,6 +32,7 @@ docs/ - 完整设计文档集 (13 文件: agent-design, architecture, engine, to
 src/core/ - 公共基础包 (4 文件: __init__, sandbox, indicators, tracer)
 src/agenticbt/ - 回测框架 (13 文件: __init__, models, engine, indicators, memory, tools, sandbox, context, agent, runner, eval, data, tracer)
 src/agent/ - 持久投资助手（Kernel + context_ops + subagents + runtime + session_store + tools + adapters: cli/telegram/im）
+.agents/subagents/ - 内置子代理定义 (2 文件: technician 技术分析, researcher 信息研究)
 scripts/ - 分析脚本 (1 文件: analyze_trace)
 examples/ - 策略模块 (2 文件: __init__, strategies)
 tests/ - BDD 测试 + E2E（18 features + 19 test_*.py step definitions/e2e + conftest）
@@ -216,7 +220,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-258 tests 全绿。agent 持久投资助手进入 Phase 2（runtime 统一组装 + SessionStore + IMDriver + Telegram polling 入口 + 会话上下文管理：auto-compact/overflow recovery/手动 compact/context 统计 + **Sub-Agent 子代理系统**：文件发现/SubAgentSystem/Agents-as-Tools/资源管控/team_prompt）。agenticbt 回测框架完成（确定性引擎 + 多资产 + bracket/limit/stop + 风控 + 11 工具）。美股数据接入完成（yfinance 默认 + Finnhub 后备 + Composite 多源路由 + MARKET_CN/MARKET_US 显式声明）。compute 沙箱线程安全（signal + ThreadPoolExecutor 双轨），market_ohlcv 返回原始 OHLCV（LLM 直接推理）。项目重心继续在 Phase 2（Discord/Webhook/流式输出/定时任务）。
+258 tests 全绿。agent 持久投资助手进入 Phase 2（runtime 统一组装 + SessionStore + IMDriver + Telegram polling 入口 + 会话上下文管理：auto-compact/overflow recovery/手动 compact/context 统计 + **Sub-Agent 子代理系统**：文件发现/SubAgentSystem/Agents-as-Tools/资源管控/team_prompt + **内置子代理**：technician 技术分析师[market_ohlcv+compute] + researcher 信息研究员[web_search+web_fetch]）。agenticbt 回测框架完成（确定性引擎 + 多资产 + bracket/limit/stop + 风控 + 11 工具）。美股数据接入完成（yfinance 默认 + Finnhub 后备 + Composite 多源路由 + MARKET_CN/MARKET_US 显式声明）。compute 沙箱线程安全（signal + ThreadPoolExecutor 双轨），market_ohlcv 返回原始 OHLCV（LLM 直接推理）。项目重心继续在 Phase 2（Discord/Webhook/流式输出/定时任务）。
 路线图：docs/roadmap.md
 
 # currentDate

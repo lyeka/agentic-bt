@@ -70,7 +70,11 @@ def register(kernel: object, adapter: MarketAdapter) -> None:
 
     kernel.tool(
         name="market_ohlcv",
-        description="获取 OHLCV 行情数据（返回完整日线：date/open/high/low/close/volume），可直接分析",
+        description=(
+            "获取 OHLCV 行情数据（返回完整日线：date/open/high/low/close/volume），可直接分析。"
+            "同时会把该标的的 DataFrame 存入 DataStore，供后续 compute 直接使用 df/open/high/low/close/volume/date。"
+            "注意: 返回结果中的 data 只是当前轮可读的 JSON，不会以 data 变量自动注入 compute。"
+        ),
         parameters={
             "type": "object",
             "properties": {

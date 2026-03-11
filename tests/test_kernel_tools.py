@@ -83,6 +83,29 @@ def given_kernel_with_market():
     return {"kernel": kernel}
 
 
+def test_compute_schema_explains_series_and_market_handoff():
+    kernel = Kernel(api_key="test")
+    compute.register(kernel)
+
+    desc = kernel._tools["compute"].schema["function"]["description"]
+
+    assert "不会把其返回 JSON 中的 data 变量带进来" in desc
+    assert "latest(close) 或 close.iloc[-1]" in desc
+    assert "不要写 close[-1]/date[-1]" in desc
+    assert "bbands()/macd() helper 返回的是最新标量三元组" in desc
+
+
+def test_market_schema_explains_compute_handoff():
+    kernel = Kernel(api_key="test")
+    adapter = CsvAdapter({"TEST": _sample_df()})
+    market.register(kernel, adapter)
+
+    desc = kernel._tools["market_ohlcv"].schema["function"]["description"]
+
+    assert "供后续 compute 直接使用 df/open/high/low/close/volume/date" in desc
+    assert "不会以 data 变量自动注入 compute" in desc
+
+
 @given("一个带市场工具的 Kernel（记录 fetch 参数）", target_fixture="ktctx")
 def given_kernel_with_spy_market():
     kernel = Kernel(api_key="test")

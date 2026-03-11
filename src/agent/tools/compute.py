@@ -38,9 +38,18 @@ def register(kernel: object) -> None:
     kernel.tool(
         name="compute",
         description=(
-            "Python 沙箱计算。预加载: df(OHLCV), close/open/high/low/volume/date, "
-            "pd, np, ta(=pandas_ta), math。"
-            "Helpers: latest, crossover, bbands, macd, tail, nz。"
+            "Python 计算沙箱（通用分析终端，不是指标菜单）。"
+            "预加载: df(OHLCV DataFrame), open/high/low/close/volume/date(均为 pandas Series), "
+            "account/cash/equity/positions, pd, np, ta(=pandas_ta), math。"
+            "Helpers: latest, prev, crossover, crossunder, above, below, "
+            "bbands(close,length,std)→(upper,mid,lower), macd(close)→(macd,signal,hist), tail, nz。"
+            "返回: 单表达式自动返回；多行代码最后一行若为表达式也会返回；也可显式设置 result。"
+            "重要语义: market_ohlcv 只是在后台注入 df，不会把其返回 JSON 中的 data 变量带进来；"
+            "若需价格序列请直接使用 df/close/date。Series 使用 pandas 语义且默认 RangeIndex，"
+            "取最后一个值请用 latest(close) 或 close.iloc[-1]，不要写 close[-1]/date[-1]。"
+            "bbands()/macd() helper 返回的是最新标量三元组，不要再对返回值写 [-1]。"
+            "注意: 不要写 import(已预注入)；不要 def 函数(用内联表达式)；不要文件 I/O；"
+            "代码保持 5-20 行 REPL 风格。用 bbands()/macd() helper 而非 ta.bbands()/ta.macd()。"
         ),
         parameters={
             "type": "object",

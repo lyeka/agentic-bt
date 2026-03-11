@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -100,6 +101,12 @@ def test_team_prompt(): pass
 
 @scenario(FEATURE, "Kernel boot 后 system prompt 包含 team 描述")
 def test_kernel_team_prompt(): pass
+
+@scenario(FEATURE, "从项目目录加载内置 technician 子代理")
+def test_builtin_technician(): pass
+
+@scenario(FEATURE, "从项目目录加载内置 researcher 子代理")
+def test_builtin_researcher(): pass
 
 
 # ── Mock 辅助 ────────────────────────────────────────────────────────────────
@@ -633,3 +640,46 @@ def when_kernel_boot_with_subagent_root(sactx):
 @then(parsers.parse('kernel system prompt 包含 "{text}"'))
 def then_kernel_prompt_contains(sactx, text):
     assert text in sactx["kernel"]._system_prompt
+
+
+# ── 内置子代理 ──────────────────────────────────────────────────────────────
+
+_PROJECT_SUBAGENT_DIR = Path(__file__).resolve().parent.parent / ".agents" / "subagents"
+
+
+@given(parsers.parse('项目 subagent 目录包含 "{name}" 定义文件'), target_fixture="sactx")
+def given_builtin_subagent(sactx, name):
+    md = _PROJECT_SUBAGENT_DIR / f"{name}.md"
+    assert md.exists(), f"内置子代理文件不存在: {md}"
+    sactx["sa_root"] = _PROJECT_SUBAGENT_DIR
+    return sactx
+
+
+@when("加载项目 subagent 文件", target_fixture="sactx")
+def when_load_project(sactx):
+    roots = [(sactx["sa_root"], "project")]
+    defs, diags = load_subagents(roots)
+    sactx["loaded"] = defs
+    sactx["diagnostics"] = diags
+    return sactx
+
+
+@then(parsers.parse('"{name}" 的工具白名单为 "{t1}" 和 "{t2}"'))
+def then_tools_whitelist(sactx, name, t1, t2):
+    defn = sactx["loaded"][name]
+    assert defn.tools is not None
+    assert set(defn.tools) == {t1, t2}
+
+
+@then(parsers.parse('"{name}" 的 token_budget 为 {n:d}'))
+def then_token_budget(sactx, name, n):
+    assert sactx["loaded"][name].token_budget == n
+
+
+def test_builtin_technician_prompt_teaches_compute_contract():
+    defs, _ = load_subagents([(_PROJECT_SUBAGENT_DIR, "project")])
+    technician = defs["technician"]
+
+    assert "there is no `data` variable" in technician.system_prompt
+    assert "Never use `close[-1]` or `date[-1]`" in technician.system_prompt
+    assert "already return latest scalar tuples" in technician.system_prompt
