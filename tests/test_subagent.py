@@ -683,3 +683,4 @@ def test_builtin_technician_prompt_teaches_compute_contract():
     assert "there is no `data` variable" in technician.system_prompt
     assert "Never use `close[-1]` or `date[-1]`" in technician.system_prompt
     assert "already return latest scalar tuples" in technician.system_prompt
+    assert "Variables created in one call do not survive into the next call" in technician.system_prompt

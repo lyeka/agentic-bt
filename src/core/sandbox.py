@@ -494,6 +494,7 @@ def _remediation_for_exc(exc: Exception) -> str:
         return (
             "可用变量: df, open, high, low, close, volume, date, account, cash, equity, positions, pd, np, ta, math。"
             "helpers: latest, prev, crossover, crossunder, above, below, bbands, macd, tail, nz。"
+            "每次 compute 独立执行，上一轮定义的变量不会保留；缺失变量请在本次代码里重新计算。"
             "提示: 用内联表达式，避免 def 多个函数互相调用。"
         )
     if isinstance(exc, KeyError):

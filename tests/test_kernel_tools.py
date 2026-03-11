@@ -90,8 +90,10 @@ def test_compute_schema_explains_series_and_market_handoff():
     desc = kernel._tools["compute"].schema["function"]["description"]
 
     assert "不会把其返回 JSON 中的 data 变量带进来" in desc
+    assert "每次调用独立命名空间" in desc
     assert "latest(close) 或 close.iloc[-1]" in desc
     assert "不要写 close[-1]/date[-1]" in desc
+    assert "必须在同一次 compute 中重新计算" in desc
     assert "bbands()/macd() helper 返回的是最新标量三元组" in desc
 
 

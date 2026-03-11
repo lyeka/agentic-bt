@@ -182,6 +182,24 @@ def test_compute_keyerror_remediation_points_to_latest_or_iloc():
     assert "close.iloc[-1]" in result["remediation"]
 
 
+def test_compute_nameerror_remediation_points_to_stateless_calls():
+    df = _make_df(50)
+    eng = Engine(data=df, symbol="AAPL", initial_cash=100_000.0,
+                 risk=RiskConfig(max_position_pct=1.0))
+    for _ in range(31):
+        eng.advance()
+    ws = Workspace()
+    mem = Memory(ws)
+    kit = ToolKit(engine=eng, memory=mem)
+
+    result = kit.execute("compute", {"code": "max_price"})
+
+    assert "error" in result
+    assert "remediation" in result
+    assert "每次 compute 独立执行" in result["remediation"]
+    assert "重新计算" in result["remediation"]
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Background
 # ─────────────────────────────────────────────────────────────────────────────

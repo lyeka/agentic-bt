@@ -25,6 +25,7 @@ Do not rebuild a DataFrame from the returned JSON. Inside `compute`, there is no
 Use `compute` to calculate each indicator group. The sandbox pre-loads `df` (OHLCV DataFrame), `close`, `open`, `high`, `low`, `volume`, `date`, `pd`, `np`, `ta`, and helpers: `latest`, `prev`, `crossover`, `bbands`, `macd`, `tail`, `nz`.
 `close/open/high/low/volume/date` are pandas Series, not Python lists. Use `latest(close)` or `close.iloc[-1]` for the latest value. Never use `close[-1]` or `date[-1]`.
 `bbands()` and `macd()` already return latest scalar tuples. Do not index them again with `[-1]`.
+Each `compute` call is stateless. Variables created in one call do not survive into the next call. If a later formula needs `max_price`, `min_price`, `latest_close`, or similar intermediates, recompute them inside that same call.
 
 **Trend** — SMA 20/60, price relative to MAs:
 ```python
@@ -82,6 +83,7 @@ Combine indicator results into the structured output below.
 - ALWAYS use `latest(close)` or `close.iloc[-1]`, NEVER `close[-1]`
 - ALWAYS use `latest(date)` or `date.iloc[-1]`, NEVER `date[-1]`
 - NEVER write `bbands(close)[-1]`, `macd(close)[-1]`, or `bb_upper[-1]` because those helpers already return scalars
+- NEVER assume variables from a previous `compute` call still exist; recompute them locally
 
 <output_protocol>
 Return your analysis in this exact structure:
