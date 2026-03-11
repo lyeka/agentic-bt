@@ -32,12 +32,12 @@
 
 ### adapters/tui/
 `__init__.py`: TUI 终端界面包入口
-`app.py`: InvestmentApp(App) — Textual TUI 主界面（布局/ChatInput/UserSubmitted 消息/worker 线程 kernel.turn/流式渲染 llm.chunk→StreamingMarkdown/进度事件渲染/confirm 桥接/SidebarPanel 多 Tab/会话管理 action_new_session+归档/耗时元数据/Escape 焦点回输入）
+`app.py`: InvestmentApp(App) — Textual TUI 主界面（布局/ChatInput/UserSubmitted 消息/worker 线程 kernel.turn + try/except 错误展示/流式渲染 llm.chunk→StreamingMarkdown/工具状态原地更新（⚙→✓）/精准 workspace wire（tool:write+edit）/confirm 桥接+超时通知/SidebarPanel 多 Tab + 每轮刷新/会话管理+widget 引用清理/耗时元数据/Escape 焦点回输入）
 `widgets.py`: StreamingMarkdown(Markdown) — 流式 Markdown 渲染（chunk 累积 + 80ms 防抖 + finalize 终结）
 `sidebar.py`: SidebarPanel(Vertical) — 增强侧边栏（TabbedContent 三 Tab：概况/持仓/行情 + refresh_profile/portfolio/market 方法）
-`screens.py`: ConfirmScreen(ModalScreen) — 文件写入确认对话框（y/n 快捷键 + 按钮）
-`commands.py`: AppCommandProvider(Provider) — 命令面板（新建会话/重置会话/切换侧边栏/查看状态/6 主题切换/退出）
-`app.tcss`: TUI CSS 样式（布局/消息气泡/耗时元数据/侧边栏 TabbedContent/输入区）
+`screens.py`: ConfirmScreen(ModalScreen) — 文件写入确认对话框（y/n 快捷键 + Horizontal 按钮容器）
+`commands.py`: AppCommandProvider(Provider) — 命令面板（新建会话/重置会话+widget 引用清理/切换侧边栏/查看状态/6 主题切换/退出）
+`app.tcss`: TUI CSS 样式（布局/消息气泡/耗时元数据/错误提示/侧边栏 TabbedContent/输入区）
 
 ### adapters/im/
 `__init__.py`: IM 通用驱动层入口

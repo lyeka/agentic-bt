@@ -59,6 +59,10 @@ def test_new_session(): pass
 def test_reply_meta(): pass
 
 
+@scenario(FEATURE, "Kernel 异常时显示错误提示")
+def test_kernel_error(): pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Fakes
 # ─────────────────────────────────────────────────────────────────────────────
@@ -70,6 +74,7 @@ class FakeKernel:
         self.turn_calls = 0
         self.model = "test-model"
         self.stream = False
+        self.should_raise = False
 
     def wire(self, pattern: str, handler) -> None:
         self._wires[pattern].append(handler)
@@ -90,6 +95,8 @@ class FakeKernel:
 
     def turn(self, user_input: str, session: Session) -> str:
         self.turn_calls += 1
+        if self.should_raise:
+            raise RuntimeError("LLM API 连接失败")
         session.history.append({"role": "user", "content": user_input})
 
         if user_input == "run":
@@ -361,3 +368,28 @@ def then_chat_is_empty(tuictx):
 @then("聊天区域包含耗时元数据")
 def then_chat_has_meta(tuictx):
     assert tuictx["results"]["has_meta"]
+
+
+@when("Kernel 在 turn 中抛出异常", target_fixture="tuictx")
+def when_kernel_raises(tuictx):
+    tuictx["kernel"].should_raise = True
+
+    async def _run():
+        app = InvestmentApp(tuictx["bundle"], tuictx["session"])
+        async with app.run_test(size=(100, 30)) as pilot:
+            text_area = app.query_one("#input", ChatInput)
+            text_area.focus()
+            text_area.insert("触发错误")
+            await pilot.pause()
+            text_area.action_submit()
+            await pilot.pause()
+            await app.workers.wait_for_complete()
+            tuictx["results"]["has_error"] = bool(app.query(".error-msg"))
+
+    asyncio.run(_run())
+    return tuictx
+
+
+@then("聊天区域包含错误提示")
+def then_chat_has_error(tuictx):
+    assert tuictx["results"]["has_error"]

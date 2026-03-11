@@ -53,14 +53,6 @@ def _load_session(bundle: Any) -> Session:
     session.id = "cli"
     return session
 
-    # ── 9. REPL ──
-    print(f"投资助手已启动 | 模型: {config.model} | trace → {bundle.trace_path}")
-    print("输入 quit 退出，/help 查看命令")
-    try:
-        _repl(kernel, session, bundle.session_store, bundle)
-    finally:
-        bundle.session_store.save(session)
-        # 保存路径由 store 决定；CLI 不需要额外打印绝对路径
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Simple REPL fallback (--simple)
@@ -192,12 +184,10 @@ def main() -> None:
     from agent.adapters.tui import InvestmentApp
 
     session = _load_session(bundle)
-    if session.history:
-        pass
-    else:
+    if not session.history:
         session = Session(session_id="cli")
 
-    app = InvestmentApp(bundle, session, keep_last=config.session_keep_last_user_messages)
+    app = InvestmentApp(bundle, session)
     app.run()
     bundle.session_store.save(session)
 

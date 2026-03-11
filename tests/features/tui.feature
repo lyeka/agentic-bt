@@ -44,3 +44,8 @@ Feature: TUI 终端界面 — 投资助手交互终端
     Given TUI 使用 Mock Kernel 启动
     When 用户输入 "分析"
     Then 聊天区域包含耗时元数据
+
+  Scenario: Kernel 异常时显示错误提示
+    Given TUI 使用 Mock Kernel 启动
+    When Kernel 在 turn 中抛出异常
+    Then 聊天区域包含错误提示

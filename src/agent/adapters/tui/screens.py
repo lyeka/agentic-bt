@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label
 
@@ -53,8 +53,9 @@ class ConfirmScreen(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-dialog"):
             yield Label(f"确认写入 [bold]{self.path}[/bold] ?", id="confirm-prompt")
-            yield Button("确认 (y)", variant="primary", id="btn-yes")
-            yield Button("取消 (n)", variant="default", id="btn-no")
+            with Horizontal(id="confirm-buttons"):
+                yield Button("确认 (y)", variant="primary", id="btn-yes")
+                yield Button("取消 (n)", variant="default", id="btn-no")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         self.dismiss(event.button.id == "btn-yes")

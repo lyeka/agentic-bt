@@ -51,10 +51,13 @@ class AppCommandProvider(Provider):
 
     def _reset_session(self) -> None:
         app = self.app
+        app._thinking_widget = None
+        app._streaming_widget = None
+        app._current_tool_widget = None
         app.session = Session(session_id=app.session.id)
-        chat = app.query_one("#chat")
-        chat.remove_children()
+        app.query_one("#chat").remove_children()
         app.bundle.session_store.save(app.session)
+        app._refresh_sidebar()
         app.notify("会话已重置")
 
     def _toggle_sidebar(self) -> None:

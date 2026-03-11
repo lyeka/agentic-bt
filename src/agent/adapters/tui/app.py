@@ -72,14 +72,13 @@ class InvestmentApp(App):
         self,
         bundle: KernelBundle,
         session: Session,
-        keep_last: int = 20,
     ) -> None:
         super().__init__()
         self.bundle = bundle
         self.session = session
-        self.keep_last = keep_last
         self._thinking_widget: Static | None = None
         self._streaming_widget: StreamingMarkdown | None = None
+        self._current_tool_widget: Static | None = None
         self._turn_start: float = 0
         self._turn_tokens: int = 0
 
@@ -131,8 +130,11 @@ class InvestmentApp(App):
 
     @work(thread=True)
     def _run_turn(self, text: str) -> None:
-        reply = self.bundle.kernel.turn(text, self.session)
-        self.call_from_thread(self._on_reply, reply)
+        try:
+            reply = self.bundle.kernel.turn(text, self.session)
+            self.call_from_thread(self._on_reply, reply)
+        except Exception as exc:
+            self.call_from_thread(self._on_error, str(exc))
 
     def _on_reply(self, reply: str) -> None:
         self._clear_thinking()
@@ -154,8 +156,17 @@ class InvestmentApp(App):
         chat.mount(Static(" · ".join(meta), classes="msg-meta"))
         chat.scroll_end(animate=False)
 
-        self.session.prune(keep_last_user_messages=max(1, self.keep_last))
         self.bundle.session_store.save(self.session)
+        self._refresh_sidebar()
+
+    def _on_error(self, msg: str) -> None:
+        self._clear_thinking()
+        if self._streaming_widget:
+            self._streaming_widget.finalize()
+            self._streaming_widget = None
+        chat = self.query_one("#chat")
+        chat.mount(Static(f"❌ {msg}", classes="error-msg"))
+        chat.scroll_end(animate=False)
 
     # ── Progress / streaming ──────────────────────────────────────────────────
 
@@ -167,7 +178,8 @@ class InvestmentApp(App):
         k.wire("tool.call.start", self._on_kernel_event)
         k.wire("tool.call.done", self._on_kernel_event)
         k.wire("turn.done", self._on_kernel_event)
-        k.wire("tool:*", self._on_workspace_change)
+        k.wire("tool:write", self._on_workspace_change)
+        k.wire("tool:edit", self._on_workspace_change)
 
     def _on_kernel_event(self, event: str, data: object) -> None:
         self.call_from_thread(self._update_progress, event, data)
@@ -196,12 +208,16 @@ class InvestmentApp(App):
         elif event == "tool.call.start":
             self._clear_thinking()
             name = d.get("name", "?")
-            chat.mount(Static(f"⚙ {name} ...", classes="tool-status"))
+            w = Static(f"⚙ {name} ...", classes="tool-status")
+            chat.mount(w)
+            self._current_tool_widget = w
             chat.scroll_end(animate=False)
 
         elif event == "tool.call.done":
             name = d.get("name", "?")
-            chat.mount(Static(f"✓ {name}", classes="tool-status"))
+            if self._current_tool_widget:
+                self._current_tool_widget.update(f"✓ {name}")
+                self._current_tool_widget = None
             chat.scroll_end(animate=False)
 
         elif event == "turn.done":
@@ -237,7 +253,8 @@ class InvestmentApp(App):
                 app.push_screen(ConfirmScreen(path), callback=_on_result)
 
             app.call_from_thread(_push)
-            event.wait(timeout=60)
+            if not event.wait(timeout=60):
+                app.call_from_thread(app.notify, "确认超时，已自动拒绝", title="超时")
             return result[0]
 
         return _confirm
@@ -263,6 +280,9 @@ class InvestmentApp(App):
             archive.mkdir(parents=True, exist_ok=True)
             ts = datetime.now().strftime("%Y%m%d_%H%M%S")
             self.session.save(archive / f"{ts}.json")
+        self._thinking_widget = None
+        self._streaming_widget = None
+        self._current_tool_widget = None
         self.session = Session(session_id=self.session.id)
         self.query_one("#chat").remove_children()
         self.bundle.session_store.save(self.session)
