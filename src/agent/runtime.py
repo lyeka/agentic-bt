@@ -124,6 +124,7 @@ def _wire_trace(kernel: Kernel, trace_path: Path) -> None:
     kernel.wire("tool:*", _append)
     kernel.wire("llm.*", _append)
     kernel.wire("tool.*", _append)
+    kernel.wire("subagent.*", _append)
     kernel.wire("memory.compressed", _append)
     kernel.wire("context.*", _append)
 

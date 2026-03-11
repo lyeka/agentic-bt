@@ -11,9 +11,10 @@ import json
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
+import pytest
 from pytest_bdd import given, parsers, scenario, then, when
 
-from agent.kernel import Kernel, Session, WORKSPACE_GUIDE
+from agent.kernel import Kernel, Session, WORKSPACE_GUIDE, _msg_to_dict
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -102,6 +103,36 @@ def given_kernel(kctx):
     kctx["session"] = Session()
     kctx["responses"] = [_mock_response("stop", content="你好！我是投资助手。")]
     return kctx
+
+
+def test_msg_to_dict_preserves_reasoning_content():
+    msg = SimpleNamespace(
+        role="assistant",
+        content=None,
+        tool_calls=[_tool_call("echo", {"text": "hi"})],
+        reasoning_content="internal reasoning",
+        model_extra=None,
+    )
+
+    result = _msg_to_dict(msg)
+
+    assert result["reasoning_content"] == "internal reasoning"
+
+
+def test_kernel_emits_llm_call_error_on_provider_exception():
+    kernel = Kernel()
+    session = Session()
+    seen: list[dict] = []
+    kernel.wire("llm.call.error", lambda _e, data: seen.append(data))
+    kernel.client = MagicMock()
+    kernel.client.chat.completions.create.side_effect = RuntimeError("provider 400")
+
+    with pytest.raises(RuntimeError, match="provider 400"):
+        kernel.turn("hello", session)
+
+    assert seen
+    assert seen[0]["error_type"] == "RuntimeError"
+    assert "provider 400" in seen[0]["error"]
 
 
 @given("一个注册了 echo 工具的 Kernel", target_fixture="kctx")

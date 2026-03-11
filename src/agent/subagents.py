@@ -264,6 +264,7 @@ class SubAgentSystem:
             result = self.invoke(name, task, context)
             return {
                 "response": result.response,
+                "run_id": result.metadata.get("run_id"),
                 "metadata": result.metadata,
             }
         return handler

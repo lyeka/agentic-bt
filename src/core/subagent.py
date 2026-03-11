@@ -11,6 +11,7 @@ import json
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
+from uuid import uuid4
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -137,6 +138,18 @@ def run_subagent(
     timed_out = False
     round_num = 0
     t0 = time.time()
+    run_id = f"{defn.name}-{uuid4().hex[:12]}"
+
+    if emit_fn:
+        emit_fn("subagent.start", {
+            "name": defn.name,
+            "run_id": run_id,
+            "task": task,
+            "has_context": bool(context),
+            "max_rounds": defn.max_rounds,
+            "token_budget": defn.token_budget,
+            "timeout_seconds": defn.timeout_seconds,
+        })
 
     for round_num in range(1, defn.max_rounds + 1):
         # 超时检查
@@ -147,7 +160,17 @@ def run_subagent(
             break
 
         if emit_fn:
-            emit_fn("subagent.round", {"name": defn.name, "round": round_num})
+            emit_fn("subagent.round", {
+                "name": defn.name,
+                "run_id": run_id,
+                "round": round_num,
+                "max": defn.max_rounds,
+            })
+            emit_fn("subagent.llm.call.start", {
+                "name": defn.name,
+                "run_id": run_id,
+                "round": round_num,
+            })
 
         # LLM 调用（3 次指数退避）
         llm_response = _call_llm(
@@ -156,15 +179,36 @@ def run_subagent(
             messages=messages,
             tools=schemas or None,
             temperature=defn.temperature,
+            emit_fn=emit_fn,
+            agent_name=defn.name,
+            run_id=run_id,
+            round_num=round_num,
         )
 
         if llm_response is None:
+            if emit_fn:
+                emit_fn("subagent.llm.call.done", {
+                    "name": defn.name,
+                    "run_id": run_id,
+                    "round": round_num,
+                    "finish_reason": "error",
+                    "total_tokens": 0,
+                })
             response_text = "[error] LLM 调用失败"
             break
 
         choice = llm_response.choices[0]
         round_tokens = getattr(getattr(llm_response, "usage", None), "total_tokens", 0) or 0
         total_tokens += round_tokens
+
+        if emit_fn:
+            emit_fn("subagent.llm.call.done", {
+                "name": defn.name,
+                "run_id": run_id,
+                "round": round_num,
+                "finish_reason": choice.finish_reason,
+                "total_tokens": round_tokens,
+            })
 
         # 捕获推理文本
         if choice.message.content:
@@ -191,6 +235,14 @@ def run_subagent(
                 except json.JSONDecodeError:
                     args = {}
 
+                if emit_fn:
+                    emit_fn("subagent.tool.call.start", {
+                        "name": defn.name,
+                        "run_id": run_id,
+                        "round": round_num,
+                        "tool": tc.function.name,
+                        "args": args,
+                    })
                 tool_result = tool_executor(tc.function.name, args)
                 all_tool_calls.append({
                     "tool": tc.function.name,
@@ -199,8 +251,17 @@ def run_subagent(
                 })
 
                 if emit_fn:
+                    emit_fn("subagent.tool.call.done", {
+                        "name": defn.name,
+                        "run_id": run_id,
+                        "round": round_num,
+                        "tool": tc.function.name,
+                        "result": tool_result,
+                    })
                     emit_fn("subagent.tool", {
                         "name": defn.name,
+                        "run_id": run_id,
+                        "round": round_num,
                         "tool": tc.function.name,
                     })
 
@@ -215,7 +276,7 @@ def run_subagent(
 
     latency_ms = (time.time() - t0) * 1000
 
-    return SubAgentResult(
+    result = SubAgentResult(
         response=response_text,
         tool_calls=all_tool_calls,
         tokens_used=total_tokens,
@@ -227,8 +288,22 @@ def run_subagent(
             "rounds": round_num,
             "timed_out": timed_out,
             "budget_exhausted": budget_exhausted,
+            "run_id": run_id,
         },
     )
+    if emit_fn:
+        emit_fn("subagent.done", {
+            "name": defn.name,
+            "run_id": run_id,
+            "rounds": round_num,
+            "tools_used": len(all_tool_calls),
+            "tokens_used": total_tokens,
+            "latency_ms": latency_ms,
+            "timed_out": timed_out,
+            "budget_exhausted": budget_exhausted,
+            "response_chars": len(response_text),
+        })
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -242,6 +317,10 @@ def _call_llm(
     messages: list,
     tools: list | None,
     temperature: float,
+    emit_fn: Callable[[str, Any], None] | None = None,
+    agent_name: str | None = None,
+    run_id: str | None = None,
+    round_num: int | None = None,
 ) -> Any | None:
     """带 3 次指数退避的 LLM 调用"""
     kwargs: dict[str, Any] = {
@@ -255,7 +334,16 @@ def _call_llm(
     for attempt in range(3):
         try:
             return client.chat.completions.create(**kwargs)
-        except Exception:
+        except Exception as exc:
+            if emit_fn and agent_name and run_id and round_num is not None:
+                emit_fn("subagent.llm.call.error", {
+                    "name": agent_name,
+                    "run_id": run_id,
+                    "round": round_num,
+                    "attempt": attempt + 1,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                })
             if attempt == 2:
                 return None
             time.sleep(2 ** attempt)
@@ -265,6 +353,12 @@ def _call_llm(
 def _msg_to_dict(msg: Any) -> dict:
     """OpenAI message 对象 → dict"""
     d: dict[str, Any] = {"role": msg.role, "content": msg.content}
+    reasoning_content = getattr(msg, "reasoning_content", None)
+    model_extra = getattr(msg, "model_extra", None)
+    if reasoning_content is None and isinstance(model_extra, dict):
+        reasoning_content = model_extra.get("reasoning_content")
+    if reasoning_content is not None:
+        d["reasoning_content"] = reasoning_content
     if msg.tool_calls:
         d["tool_calls"] = [
             {

@@ -568,7 +568,15 @@ class Kernel:
                 kwargs["tools"] = tool_schemas
 
             self.emit("llm.call.start", {"round": round_num})
-            response = self.client.chat.completions.create(**kwargs)
+            try:
+                response = self.client.chat.completions.create(**kwargs)
+            except Exception as exc:
+                self.emit("llm.call.error", {
+                    "round": round_num,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                })
+                raise
             choice = response.choices[0]
             tokens = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
             self.emit(
@@ -668,6 +676,12 @@ class Kernel:
 def _msg_to_dict(msg: Any) -> dict:
     """OpenAI message 对象 → dict"""
     d: dict[str, Any] = {"role": msg.role, "content": msg.content}
+    reasoning_content = getattr(msg, "reasoning_content", None)
+    model_extra = getattr(msg, "model_extra", None)
+    if reasoning_content is None and isinstance(model_extra, dict):
+        reasoning_content = model_extra.get("reasoning_content")
+    if reasoning_content is not None:
+        d["reasoning_content"] = reasoning_content
     if msg.tool_calls:
         d["tool_calls"] = [
             {

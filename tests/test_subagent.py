@@ -15,7 +15,7 @@ from unittest.mock import MagicMock, patch
 
 from pytest_bdd import given, parsers, scenario, then, when
 
-from core.subagent import SubAgentDef, SubAgentResult, filter_schemas, run_subagent
+from core.subagent import SubAgentDef, SubAgentResult, filter_schemas, run_subagent, _msg_to_dict
 from agent.subagents import (
     SubAgentSystem,
     discover_subagent_files,
@@ -23,6 +23,7 @@ from agent.subagents import (
     parse_subagent_file,
 )
 from agent.kernel import Kernel, Session
+from agent.runtime import _wire_trace
 
 
 FEATURE = "features/subagent.feature"
@@ -684,3 +685,97 @@ def test_builtin_technician_prompt_teaches_compute_contract():
     assert "Never use `close[-1]` or `date[-1]`" in technician.system_prompt
     assert "already return latest scalar tuples" in technician.system_prompt
     assert "Variables created in one call do not survive into the next call" in technician.system_prompt
+
+
+def test_run_subagent_emits_namespaced_lifecycle_events_with_shared_run_id():
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = [
+        _mock_response("tool_calls", tool_calls=[_tool_call("read", {"path": "x.py"})], total_tokens=11),
+        _mock_response("stop", content="done", total_tokens=7),
+    ]
+    events: list[tuple[str, dict]] = []
+
+    result = run_subagent(
+        definition=_simple_defn("tracey"),
+        task="inspect",
+        client=mock_client,
+        model="test-model",
+        tool_schemas=[_make_schema("read")],
+        tool_executor=lambda n, a: {"ok": True, "tool": n},
+        emit_fn=lambda event, data: events.append((event, data)),
+    )
+
+    event_names = [event for event, _data in events]
+    assert "subagent.start" in event_names
+    assert "subagent.llm.call.start" in event_names
+    assert "subagent.llm.call.done" in event_names
+    assert "subagent.tool.call.start" in event_names
+    assert "subagent.tool.call.done" in event_names
+    assert "subagent.done" in event_names
+
+    run_ids = {
+        data["run_id"]
+        for _event, data in events
+        if isinstance(data, dict) and "run_id" in data
+    }
+    assert len(run_ids) == 1
+    assert result.metadata["run_id"] in run_ids
+
+
+def test_wire_trace_captures_subagent_events(tmp_path):
+    kernel = Kernel(api_key="test")
+    trace_path = tmp_path / "trace.jsonl"
+
+    _wire_trace(kernel, trace_path)
+    kernel.emit("subagent.start", {"name": "helper", "run_id": "run-1"})
+
+    content = trace_path.read_text(encoding="utf-8")
+    assert '"event": "subagent.start"' in content
+
+
+def test_ask_handler_returns_subagent_run_id():
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.return_value = _mock_response("stop", content="ok")
+    system = _make_system(mock_client=mock_client)
+    system.register(_simple_defn("helper"))
+
+    result = system.as_tool_defs()["ask_helper"]["handler"]({"task": "do it"})
+
+    assert result["run_id"]
+    assert result["metadata"]["run_id"] == result["run_id"]
+
+
+def test_subagent_msg_to_dict_preserves_reasoning_content():
+    msg = SimpleNamespace(
+        role="assistant",
+        content=None,
+        tool_calls=[_tool_call("read", {"path": "x.py"})],
+        reasoning_content="step-by-step",
+        model_extra=None,
+    )
+
+    result = _msg_to_dict(msg)
+
+    assert result["reasoning_content"] == "step-by-step"
+
+
+def test_run_subagent_emits_llm_call_error_details_after_retries():
+    mock_client = MagicMock()
+    mock_client.chat.completions.create.side_effect = RuntimeError("provider 400")
+    events: list[tuple[str, dict]] = []
+
+    result = run_subagent(
+        definition=_simple_defn("tracey"),
+        task="inspect",
+        client=mock_client,
+        model="test-model",
+        tool_schemas=[],
+        tool_executor=lambda n, a: {"ok": True},
+        emit_fn=lambda event, data: events.append((event, data)),
+    )
+
+    error_events = [data for event, data in events if event == "subagent.llm.call.error"]
+    assert len(error_events) == 3
+    assert all(evt["error_type"] == "RuntimeError" for evt in error_events)
+    assert all("provider 400" in evt["error"] for evt in error_events)
+    assert result.response == "[error] LLM 调用失败"
