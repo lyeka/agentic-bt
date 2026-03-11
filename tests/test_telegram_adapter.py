@@ -7,8 +7,14 @@
 
 from __future__ import annotations
 
+import asyncio
+from pathlib import Path
+from types import SimpleNamespace
+
 from agent.adapters.telegram import (
+    _collect_attachments,
     _markdown_to_html,
+    _message_text,
     _normalize_render_mode,
     _parse_allowed_user_ids,
     _parse_bool,
@@ -54,3 +60,60 @@ def test_markdown_to_html_basic():
     assert "<code>code</code>" in html
     assert "<pre><code>" in html and "</code></pre>" in html
 
+
+def test_message_text_uses_caption_for_media_message():
+    message = SimpleNamespace(text=None, caption="image caption")
+    assert _message_text(message) == "image caption"
+
+
+def test_collect_photo_attachment_downloads_to_state_dir(tmp_path: Path):
+    class FakeTelegramFile:
+        async def download_to_drive(self, custom_path: str) -> None:
+            Path(custom_path).write_bytes(b"img")
+
+    class FakeBot:
+        async def get_file(self, file_id: str):
+            assert file_id == "file-1"
+            return FakeTelegramFile()
+
+    message = SimpleNamespace(
+        photo=[
+            SimpleNamespace(file_id="file-1", file_unique_id="uniq-1", width=640, height=480, file_size=123),
+        ],
+        document=None,
+        voice=None,
+        audio=None,
+    )
+
+    async def _run():
+        return await _collect_attachments(
+            bot=FakeBot(),
+            message=message,
+            media_root=tmp_path,
+            conversation_id="chat-1",
+            message_id="msg-1",
+        )
+
+    attachments, error = asyncio.run(_run())
+    assert error is None
+    assert len(attachments) == 1
+    assert attachments[0].kind == "image"
+    assert attachments[0].path.endswith("image-uniq-1.jpg")
+    assert Path(attachments[0].path).exists()
+
+
+def test_collect_audio_attachment_returns_explicit_error(tmp_path: Path):
+    message = SimpleNamespace(photo=None, document=None, voice=object(), audio=None)
+
+    async def _run():
+        return await _collect_attachments(
+            bot=object(),
+            message=message,
+            media_root=tmp_path,
+            conversation_id="chat-1",
+            message_id="msg-1",
+        )
+
+    attachments, error = asyncio.run(_run())
+    assert attachments == ()
+    assert "音频" in error

@@ -9,14 +9,17 @@ from __future__ import annotations
 
 import asyncio
 import html
+import mimetypes
 import os
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
 
+from agent.messages import AttachmentRef
 from agent.adapters.im.backend import InboundMessage, OutboundRef
 from agent.adapters.im.driver import IMDriver
 from agent.runtime import AgentConfig
@@ -139,6 +142,103 @@ def _is_parse_error(exc: Exception) -> bool:
     )
 
 
+def _message_text(message: Any) -> str:
+    return str(getattr(message, "text", None) or getattr(message, "caption", None) or "")
+
+
+def _safe_file_name(raw: str | None, *, fallback: str) -> str:
+    name = (raw or "").strip()
+    if not name:
+        return fallback
+    name = re.sub(r"[^A-Za-z0-9._-]+", "_", name)
+    return name or fallback
+
+
+def _suffix_for_mime(mime_type: str | None, *, fallback: str) -> str:
+    guessed = mimetypes.guess_extension(mime_type or "")
+    if guessed:
+        return guessed
+    return fallback
+
+
+def _media_dir(base: Path, conversation_id: str, message_id: str) -> Path:
+    return base / str(conversation_id) / str(message_id)
+
+
+async def _download_attachment(bot: Any, *, file_id: str, target_path: Path) -> int | None:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    tg_file = await bot.get_file(file_id)
+    await tg_file.download_to_drive(custom_path=str(target_path))
+    try:
+        return target_path.stat().st_size
+    except OSError:
+        return None
+
+
+async def _collect_attachments(
+    *,
+    bot: Any,
+    message: Any,
+    media_root: Path,
+    conversation_id: str,
+    message_id: str,
+) -> tuple[tuple[AttachmentRef, ...], str | None]:
+    photos = list(getattr(message, "photo", None) or [])
+    if photos:
+        picked = max(
+            photos,
+            key=lambda item: (
+                int(getattr(item, "width", 0) or 0) * int(getattr(item, "height", 0) or 0),
+                int(getattr(item, "file_size", 0) or 0),
+            ),
+        )
+        source_id = str(getattr(picked, "file_unique_id", None) or getattr(picked, "file_id", "photo"))
+        target_name = f"image-{source_id}.jpg"
+        target_path = _media_dir(media_root, conversation_id, message_id) / target_name
+        size_bytes = await _download_attachment(bot, file_id=str(picked.file_id), target_path=target_path)
+        return (
+            AttachmentRef(
+                kind="image",
+                path=str(target_path),
+                mime_type="image/jpeg",
+                size_bytes=size_bytes or getattr(picked, "file_size", None),
+                source_id=source_id,
+                width=getattr(picked, "width", None),
+                height=getattr(picked, "height", None),
+                original_name=target_name,
+            ),
+        ), None
+
+    document = getattr(message, "document", None)
+    if document is not None:
+        mime_type = str(getattr(document, "mime_type", "") or "")
+        if mime_type.startswith("image/"):
+            suffix = _suffix_for_mime(mime_type, fallback=".img")
+            original_name = _safe_file_name(
+                getattr(document, "file_name", None),
+                fallback=f"image{suffix}",
+            )
+            source_id = str(getattr(document, "file_unique_id", None) or getattr(document, "file_id", "document"))
+            target_path = _media_dir(media_root, conversation_id, message_id) / original_name
+            size_bytes = await _download_attachment(bot, file_id=str(document.file_id), target_path=target_path)
+            return (
+                AttachmentRef(
+                    kind="image",
+                    path=str(target_path),
+                    mime_type=mime_type,
+                    size_bytes=size_bytes or getattr(document, "file_size", None),
+                    source_id=source_id,
+                    original_name=original_name,
+                ),
+            ), None
+        return (), "暂不支持文件输入；本期仅支持图片。"
+
+    if getattr(message, "voice", None) is not None or getattr(message, "audio", None) is not None:
+        return (), "暂不支持音频输入；本期仅支持图片。"
+
+    return (), None
+
+
 @dataclass
 class TelegramBackend:
     """
@@ -250,6 +350,7 @@ def main() -> None:
         default=False,
     )
     render_mode = _normalize_render_mode(os.getenv("TELEGRAM_RENDER_MODE"))
+    media_root = config.state_dir.expanduser() / "media" / "telegram"
 
     # 运行时导入，避免未安装依赖时报错影响其他模块
     try:
@@ -284,7 +385,7 @@ def main() -> None:
     async def on_message(update: Update, context: Any) -> None:
         if update.effective_chat is None or update.effective_user is None:
             return
-        if update.message is None or update.message.text is None:
+        if update.message is None:
             return
 
         chat = update.effective_chat
@@ -303,14 +404,30 @@ def main() -> None:
                 )
             return
 
+        attachments, media_error = await _collect_attachments(
+            bot=context.bot,
+            message=update.message,
+            media_root=media_root,
+            conversation_id=str(chat.id),
+            message_id=str(update.message.message_id),
+        )
+        if media_error:
+            await context.bot.send_message(chat_id=chat.id, text=media_error)
+            return
+
+        text = _message_text(update.message)
+        if not text and not attachments:
+            return
+
         msg = InboundMessage(
             adapter="telegram",
             conversation_id=str(chat.id),
             user_id=str(user.id),
             is_private=(chat.type == "private"),
-            text=update.message.text,
+            text=text,
             message_id=str(update.message.message_id),
             ts=update.message.date,
+            attachments=attachments,
         )
         await driver.handle(msg)
 
@@ -330,7 +447,7 @@ def main() -> None:
         show_process_messages=show_process_messages,
     )
     app.add_handler(CallbackQueryHandler(on_callback_query))
-    app.add_handler(MessageHandler(filters.TEXT, on_message))
+    app.add_handler(MessageHandler(filters.ALL, on_message))
 
     # polling
     # drop_pending_updates 等价于 deleteWebhook(drop_pending_updates=...)

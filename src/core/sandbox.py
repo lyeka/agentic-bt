@@ -29,7 +29,10 @@ import pandas_ta as ta
 # 白名单 import — 允许 pandas/numpy/pandas_ta/math，拒绝其他
 # ─────────────────────────────────────────────────────────────────────────────
 
-_ALLOWED_MODULES = frozenset({"pandas", "numpy", "pandas_ta", "math"})
+_ALLOWED_MODULES = frozenset({
+    "pandas", "numpy", "pandas_ta", "math",
+    "time", "datetime",  # pandas Timestamp.strftime() 内部依赖
+})
 
 
 def _safe_import(name: str, globals: Any = None, locals: Any = None,
@@ -331,9 +334,13 @@ def _exec_code(code: str, local_ns: dict[str, Any]) -> dict[str, Any]:
             "remediation": "写一个表达式（如 ta.rsi(close,14)）或赋值给 result。",
         }
 
+    # 合并命名空间：解决 exec(code, globals, locals) 下用户函数互相不可见的 Python 经典坑
+    # local_ns 条目覆盖 _SAFE_GLOBALS 同名条目（如 open 别名覆盖 builtins.open），符合预期
+    exec_ns = {**_SAFE_GLOBALS, **local_ns}
+
     try:
         compiled = compile(stripped, "<compute>", "eval")
-        value = eval(compiled, _SAFE_GLOBALS, local_ns)  # noqa: S307
+        value = eval(compiled, exec_ns)  # noqa: S307
         return {"result": _serialize(value, depth=0)}
     except SyntaxError:
         pass
@@ -351,16 +358,16 @@ def _exec_code(code: str, local_ns: dict[str, Any]) -> dict[str, Any]:
         prefix_body = module.body[:-1]
         if prefix_body:
             prefix_mod = ast.Module(body=prefix_body, type_ignores=[])
-            exec(compile(prefix_mod, "<compute>", "exec"), _SAFE_GLOBALS, local_ns)  # noqa: S102
-        if "result" in local_ns:
-            return {"result": _serialize(local_ns.get("result"), depth=0)}
+            exec(compile(prefix_mod, "<compute>", "exec"), exec_ns)  # noqa: S102
+        if "result" in exec_ns:
+            return {"result": _serialize(exec_ns.get("result"), depth=0)}
         expr = ast.Expression(last.value)
-        value = eval(compile(expr, "<compute>", "eval"), _SAFE_GLOBALS, local_ns)  # noqa: S307
+        value = eval(compile(expr, "<compute>", "eval"), exec_ns)  # noqa: S307
         return {"result": _serialize(value, depth=0)}
 
-    exec(compile(module, "<compute>", "exec"), _SAFE_GLOBALS, local_ns)  # noqa: S102
-    if "result" in local_ns:
-        return {"result": _serialize(local_ns.get("result"), depth=0)}
+    exec(compile(module, "<compute>", "exec"), exec_ns)  # noqa: S102
+    if "result" in exec_ns:
+        return {"result": _serialize(exec_ns.get("result"), depth=0)}
     return {
         "error": "未产生输出",
         "remediation": "设置 result=... 或让最后一行成为表达式。",
@@ -479,15 +486,24 @@ def _serialize(value: Any, depth: int = 0) -> Any:
 def _remediation_for_exc(exc: Exception) -> str:
     """将常见异常映射为 LLM 可执行的修复建议（尽量短）。"""
     if isinstance(exc, ImportError):
-        return "沙箱仅允许导入 pandas/numpy/pandas_ta/math；且已预注入为 pd/np/ta/math，通常不需要 import。"
+        return (
+            "pd/np/ta/math 已预注入，无需 import。"
+            "沙箱仅允许 pandas/numpy/pandas_ta/math/time/datetime。"
+        )
     if isinstance(exc, NameError):
         return (
             "可用变量: df, open, high, low, close, volume, date, account, cash, equity, positions, pd, np, ta, math。"
             "helpers: latest, prev, crossover, crossunder, above, below, bbands, macd, tail, nz。"
-            "compute 不是指标菜单：需要新指标直接用 Python/Series 运算实现。"
+            "每次 compute 独立执行，上一轮定义的变量不会保留；缺失变量请在本次代码里重新计算。"
+            "提示: 用内联表达式，避免 def 多个函数互相调用。"
         )
     if isinstance(exc, KeyError):
-        return "df 列为 date/open/high/low/close/volume（小写）。可用 df.columns 查看。"
+        return (
+            "df 列为 date/open/high/low/close/volume（小写）。"
+            "Series 默认是 RangeIndex，close[-1]/date[-1] 会按标签查找并触发 KeyError；"
+            "取最后一个值请用 latest(close) 或 close.iloc[-1]。"
+            "ta.bbands()/ta.macd() 列名因版本而异，请用 bbands()/macd() helper 代替。"
+        )
     if isinstance(exc, IndexError):
         return "检查数据长度: len(df)。避免固定负索引；可用 min(n, len(df)) 或 tail(close, n)。"
     if isinstance(exc, ZeroDivisionError):

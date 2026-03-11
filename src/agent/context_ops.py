@@ -1,5 +1,5 @@
 """
-[INPUT]: json, dataclasses, typing
+[INPUT]: json, dataclasses, typing, agent.messages, agent.providers
 [OUTPUT]: estimate_tokens, ContextInfo, context_info, CompactResult, compact_history
 [POS]: 上下文管理纯函数层，零框架依赖，被 Kernel 和适配器调用
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
+from agent.messages import count_attachment_tokens, extract_text, normalize_history
+from agent.providers import OpenAIChatProvider
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Token 估算
@@ -19,7 +21,14 @@ def estimate_tokens(messages: list[dict]) -> int:
     """粗估 token 数：json 序列化字节数 // 4"""
     if not messages:
         return 0
-    return len(json.dumps(messages, ensure_ascii=False).encode("utf-8")) // 4
+    normalized = normalize_history(messages)
+    text_like = [
+        {**m, "content": extract_text(m)} if m.get("role") == "user" else m
+        for m in normalized
+    ]
+    text_tokens = len(json.dumps(text_like, ensure_ascii=False).encode("utf-8")) // 4
+    attachment_tokens = sum(count_attachment_tokens(m) for m in normalized)
+    return text_tokens + attachment_tokens
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -91,7 +100,8 @@ class CompactResult:
 
 def compact_history(
     *,
-    client: object,
+    provider: object | None = None,
+    client: object | None = None,
     model: str,
     history: list[dict],
     recent_turns: int = 3,
@@ -120,7 +130,8 @@ def compact_history(
     retained = history[cut:]
 
     # LLM 压缩（含 fallback）
-    summary = _llm_compress(client, model, to_compress)
+    use_provider = provider or OpenAIChatProvider(client=client)
+    summary = _llm_compress(use_provider, model, to_compress)
 
     return CompactResult(
         summary=summary,
@@ -130,20 +141,20 @@ def compact_history(
     )
 
 
-def _llm_compress(client: object, model: str, messages: list[dict]) -> str:
+def _llm_compress(provider: object, model: str, messages: list[dict]) -> str:
     """调用 LLM 压缩消息段，失败时退化为空摘要（等同截断）"""
     conversation_text = "\n".join(
-        f"[{m.get('role', '?')}]: {m.get('content', '')}" for m in messages
+        f"[{m.get('role', '?')}]: {extract_text(m)}" for m in normalize_history(messages)
     )
     try:
-        response = client.chat.completions.create(  # type: ignore[union-attr]
+        response = provider.complete(  # type: ignore[union-attr]
             model=model,
             messages=[
                 {"role": "system", "content": _COMPRESS_PROMPT},
                 {"role": "user", "content": conversation_text},
             ],
         )
-        return response.choices[0].message.content or ""
+        return str(response.assistant_message.get("content") or "")
     except Exception:
         # LLM 失败 → 退化为截断，丢弃旧消息
         return ""

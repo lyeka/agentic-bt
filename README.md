@@ -4,7 +4,7 @@
 > 仿生学设计 · 有灵魂 · 有记忆 · 能看行情 · 能计算 · 能成长
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
-![BDD Tests](https://img.shields.io/badge/tests-211%20passed-brightgreen)
+![BDD Tests](https://img.shields.io/badge/tests-282%20passed-brightgreen)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 ---
@@ -25,6 +25,7 @@
 灵魂（价值观/性格/风格）    →    soul.md
 记忆（经验/观察/偏好）      →    memory.md（单文件，倒排，自动压缩）
 笔记本（研究报告/草稿）    →    notebook/
+团队（专业领域分工）        →    SubAgent（独立上下文 + 工具隔离）
 眼睛（看行情）              →    market.ohlcv（Tushare A 股日线）
 计算器（扩展心算）          →    compute（沙箱 Python + Trading Coreutils）
 手（操作文件）              →    read / write / edit
@@ -37,7 +38,7 @@
 
 | 系统 | 定位 | 状态 |
 |------|------|------|
-| **agent** | 持久投资助手 — Kernel + 6 工具 + 自举 + Soul/Memory | Phase 1 完成，活跃开发中 |
+| **agent** | 持久投资助手 — Kernel + 工具 + 自举 + Soul/Memory + SubAgent | Phase 2 活跃开发中 |
 | **agenticbt** | 量化回测框架 — 确定性引擎 + LLM Agent + 11 工具 | 完成 |
 | **core** | 公共基础 — 沙箱 / 指标 / 追踪，两个系统共享 | 完成 |
 
@@ -120,13 +121,15 @@ OPENAI_API_KEY=sk-... python demo.py --provider openai --csv your_data.csv
 Adapters (CLI / Telegram)
        │
     Kernel
-    ├── turn()  ← ReAct loop
-    ├── wire()  ← 声明式管道（fnmatch 路径模式）
-    ├── emit()  ← 管道触发
-    ├── boot()  ← 自举（检测 soul.md → 注入系统提示词）
-    ├── data    ← DataStore（OHLCV 自动注入 compute）
-    └── 6 Tools
-        read · write · edit · compute · market.ohlcv · bash
+    ├── turn()       ← ReAct loop（SubAgent 对主循环透明）
+    ├── wire()       ← 声明式管道（fnmatch 路径模式）
+    ├── emit()       ← 管道触发
+    ├── boot()       ← 自举（soul.md + skills + subagents）
+    ├── data         ← DataStore（OHLCV 自动注入 compute）
+    ├── Tools        ← read · write · edit · compute · market.ohlcv · bash
+    ├── Skills       ← .md 文件定义，注入 system prompt
+    └── SubAgents    ← 独立上下文 ReAct loop，Agents-as-Tools
+        ask_{name} · create_subagent · list_subagents
 ```
 
 ### agenticbt — 回测框架
@@ -152,6 +155,7 @@ from pathlib import Path
 from agent.kernel import Kernel, Session, Permission
 from agent.tools import read, write, edit, compute, market, bash
 from agent.adapters.market.csv import CsvAdapter
+from core.subagent import SubAgentDef
 
 workspace, cwd = Path("./workspace"), Path.cwd()
 kernel = Kernel(model="gpt-4o-mini", api_key="sk-...")
@@ -164,14 +168,22 @@ compute.register(kernel)
 market.register(kernel, CsvAdapter({"300750": your_dataframe}))  # OHLCV DataFrame
 bash.register(kernel, cwd=cwd)
 
-# 自举（检测 soul.md，无则进入种子对话）
+# 自举（检测 soul.md + 加载 skills + 发现 subagents）
 kernel.boot(workspace)
+
+# 程序化注册子代理（可选）
+kernel.subagent(SubAgentDef(
+    name="analyst",
+    description="数据分析专家",
+    system_prompt="你是数据分析师，擅长用 compute 工具计算指标。",
+    tools=["compute", "read"],
+))
 
 # 声明式管道 + 权限
 kernel.wire("write:soul.md", lambda e, d: kernel._assemble_system_prompt())
 kernel.permission("soul.md", Permission.USER_CONFIRM)
 
-# 对话
+# 对话（主 Agent 可自动委派任务给 analyst）
 session = Session(session_id="demo")
 reply = kernel.turn("分析一下宁德时代最近的走势", session)
 ```
@@ -240,6 +252,78 @@ print(f"夏普比率  {p.sharpe_ratio:.3f}")
 
 ---
 
+## Sub-Agent 子代理系统
+
+主 Agent 可以将任务委派给子代理。子代理拥有独立上下文窗口、受限工具集和输出契约。框架是**领域无关**的——子代理的专业领域完全由 `system_prompt` + `tools` 定义。
+
+### 设计哲学：Agents-as-Tools
+
+子代理被包装为 `ask_{name}` 工具，对 Kernel 主循环**完全透明**。主 Agent 像调工具一样委派任务，子代理执行独立的 ReAct loop 后返回结果。
+
+```
+主 Agent                              子代理
+    │  ① system_prompt (身份契约)         │
+    │  ② task + context (共享理解)   →    │  独立 ReAct loop
+    │  ③ result + metadata (增量价值) ←   │  + 工具隔离
+```
+
+### 三种注册方式
+
+**1. 文件发现（推荐）** — 在 `.agents/subagents/` 目录放 `.md` 文件：
+
+```markdown
+---
+name: researcher
+description: "信息检索专家，擅长搜索和整理资料"
+tools: [web_search, web_fetch, read]
+max_rounds: 15
+token_budget: 80000
+---
+
+你是信息检索和知识整理专家。
+
+<output_protocol>
+格式：摘要(1句话) → 关键发现(列表) → 详细分析 → 来源链接
+</output_protocol>
+```
+
+搜索路径：项目级 `.agents/subagents/`，用户级 `~/.agents/subagents/`。
+
+**2. API 注册** — 程序化注册：
+
+```python
+from core.subagent import SubAgentDef
+
+kernel.subagent(SubAgentDef(
+    name="coder",
+    description="Python 编程专家",
+    system_prompt="你是经验丰富的 Python 开发者。",
+    tools=["bash", "compute", "read", "write", "edit"],
+))
+```
+
+**3. 动态创建** — 主 Agent 在对话中调用 `create_subagent` 工具，按需创建。
+
+### 资源管控
+
+| 资源 | 默认值 | 说明 |
+|------|-------|------|
+| `max_subagents` | 10 | 系统级子代理总数上限 |
+| `token_budget` | 50,000 | 单次调用 token 上限 |
+| `timeout_seconds` | 120 | 单次调用超时 |
+| `max_rounds` | 10 | ReAct loop 最大轮次 |
+
+超限时优雅终止，返回已有结果 + `metadata.budget_exhausted` / `metadata.timed_out` 标记。
+
+### 安全隔离
+
+- 工具访问按 `tools`（白名单）/ `blocked_tools`（黑名单）过滤
+- `ask_*` / `create_subagent` 始终被拦截，防止子代理间递归
+- 每次调用独立上下文，不看父消息历史
+- DataStore 只读，soul.md 禁止访问
+
+---
+
 <details>
 <summary><b>策略库 — 8 种预置策略</b></summary>
 
@@ -274,16 +358,22 @@ agentic-bt/
 ├── src/
 │   ├── agent/                     # 持久投资助手（活跃开发）
 │   │   ├── kernel.py              # Kernel（ReAct + wire/emit + DataStore + Permission + boot）
+│   │   ├── subagents.py           # SubAgentSystem（发现/解析/注册/调用/工具生成）
+│   │   ├── skills.py              # Skill Engine（发现/注入/显式展开）
 │   │   ├── tools/
 │   │   │   ├── read.py            # 文件读取
 │   │   │   ├── write.py           # 文件写入
 │   │   │   ├── edit.py            # 文本替换
 │   │   │   ├── compute.py         # 沙箱 Python
 │   │   │   ├── market.py          # MarketAdapter + market.ohlcv
-│   │   │   └── bash.py            # Shell 执行
+│   │   │   ├── bash.py            # Shell 执行
+│   │   │   └── web.py             # 搜索 + 抓取
 │   │   ├── adapters/
 │   │   │   ├── cli.py             # CLI REPL
-│   │   │   └── market/            # TushareAdapter · CsvAdapter
+│   │   │   ├── telegram.py        # Telegram Bot
+│   │   │   ├── im/                # IM 通用驱动层
+│   │   │   ├── market/            # TushareAdapter · YFinanceAdapter · FinnhubAdapter · Composite
+│   │   │   └── web/               # TavilyAdapter
 │   │   └── bootstrap/seed.py      # 自举种子 prompt
 │   │
 │   ├── agenticbt/                 # 回测框架
@@ -299,11 +389,12 @@ agentic-bt/
 │   └── core/                      # 公共基础
 │       ├── sandbox.py             # 沙箱执行器
 │       ├── indicators.py          # pandas-ta 防前瞻包装（6 指标）
-│       └── tracer.py              # JSONL 追踪（对齐 OTel GenAI）
+│       ├── tracer.py              # JSONL 追踪（对齐 OTel GenAI）
+│       └── subagent.py            # SubAgent 纯函数层（SubAgentDef + ReAct loop + 资源管控）
 │
 ├── tests/
-│   ├── features/                  # 16 个 Gherkin feature 文件
-│   └── test_*.py                  # 17 个 step definitions + E2E
+│   ├── features/                  # 25 个 Gherkin feature 文件
+│   └── test_*.py                  # step definitions + E2E
 │
 ├── examples/strategies.py         # 8 策略注册表（Mock Agent + LLM Prompt）
 ├── scripts/                       # trace 分析脚本
@@ -323,8 +414,8 @@ agentic-bt/
 | 阶段 | 状态 | 亮点 |
 |------|------|------|
 | **agent Phase 1** | 完成 | Kernel + 6 工具 + Soul/Memory + 自举 + Session 持久化 |
-| **agent Phase 2** | 计划中 | Telegram 通道 · APScheduler 定时任务 · Skill Engine |
-| **agent Phase 3** | 未来 | 成长循环（reflections → beliefs → soul 微调）· Subagent · /backtest skill |
+| **agent Phase 2** | 进行中 | Telegram · IM 通用驱动 · Skill Engine · **Sub-Agent 子代理系统** · 会话上下文管理 |
+| **agent Phase 3** | 未来 | 成长循环（reflections → beliefs → soul 微调）· 并行 SubAgent · /backtest skill |
 | agenticbt V1 | 完成 | 单资产 · 市价单 · BDD 驱动 · Mock + 真实 LLM |
 | agenticbt V2 | 完成 | 多资产 · bracket/limit/stop · 风控 4 检查 · ~190 BDD scenarios |
 

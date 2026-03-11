@@ -139,6 +139,14 @@ def test_latest_series_last(): pass
 def test_latest_bbands_safe(): pass
 
 
+@scenario("features/compute.feature", "用户定义函数可互相调用")
+def test_user_functions_cross_call(): pass
+
+
+@scenario("features/compute.feature", "strftime 不触发 import 错误")
+def test_strftime_no_import_error(): pass
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 数据工厂
 # ─────────────────────────────────────────────────────────────────────────────
@@ -154,6 +162,42 @@ def _make_df(n: int = 50, seed: int = 42) -> pd.DataFrame:
         "close": close,
         "volume": rng.integers(500_000, 2_000_000, n).astype(float),
     })
+
+
+def test_compute_keyerror_remediation_points_to_latest_or_iloc():
+    df = _make_df(50)
+    eng = Engine(data=df, symbol="AAPL", initial_cash=100_000.0,
+                 risk=RiskConfig(max_position_pct=1.0))
+    for _ in range(31):
+        eng.advance()
+    ws = Workspace()
+    mem = Memory(ws)
+    kit = ToolKit(engine=eng, memory=mem)
+
+    result = kit.execute("compute", {"code": "close[-1]"})
+
+    assert "error" in result
+    assert "remediation" in result
+    assert "latest(close)" in result["remediation"]
+    assert "close.iloc[-1]" in result["remediation"]
+
+
+def test_compute_nameerror_remediation_points_to_stateless_calls():
+    df = _make_df(50)
+    eng = Engine(data=df, symbol="AAPL", initial_cash=100_000.0,
+                 risk=RiskConfig(max_position_pct=1.0))
+    for _ in range(31):
+        eng.advance()
+    ws = Workspace()
+    mem = Memory(ws)
+    kit = ToolKit(engine=eng, memory=mem)
+
+    result = kit.execute("compute", {"code": "max_price"})
+
+    assert "error" in result
+    assert "remediation" in result
+    assert "每次 compute 独立执行" in result["remediation"]
+    assert "重新计算" in result["remediation"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -262,6 +306,28 @@ def when_compute_deep_serialize_dict(cptx):
 @when("调用 compute bbands 后对返回值调用 latest", target_fixture="cptx")
 def when_compute_latest_bbands(cptx):
     code = "upper, mid, lower = bbands(df.close, 20, 2)\nresult = latest(upper)"
+    cptx["result"] = cptx["kit"].execute("compute", {"code": code})
+    cptx["results"].append(cptx["result"])
+    return cptx
+
+
+@when("调用 compute 定义两个互调函数", target_fixture="cptx")
+def when_compute_cross_calling_functions(cptx):
+    code = (
+        "def double(x):\n"
+        "    return x * 2\n"
+        "def quad(x):\n"
+        "    return double(double(x))\n"
+        "quad(5)"
+    )
+    cptx["result"] = cptx["kit"].execute("compute", {"code": code})
+    cptx["results"].append(cptx["result"])
+    return cptx
+
+
+@when("调用 compute 日期格式化 strftime", target_fixture="cptx")
+def when_compute_strftime(cptx):
+    code = "str(df['date'].iloc[-1])[:10]"
     cptx["result"] = cptx["kit"].execute("compute", {"code": code})
     cptx["results"].append(cptx["result"])
     return cptx
@@ -490,3 +556,17 @@ def then_returns_macd_tuple(cptx):
     r = cptx["result"]["result"]
     assert isinstance(r, (list, tuple)), f"expected tuple/list, got {type(r)}: {r}"
     assert len(r) == 3
+
+
+@then("compute 返回正确函数互调结果")
+def then_returns_cross_call_result(cptx):
+    r = cptx["result"]["result"]
+    assert r == 20, f"expected 20 (quad(5)=double(double(5))), got {r}"
+
+
+@then("compute 返回日期字符串")
+def then_returns_date_string(cptx):
+    r = cptx["result"]["result"]
+    assert isinstance(r, str), f"expected str, got {type(r)}: {r}"
+    assert len(r) == 10, f"expected YYYY-MM-DD format, got {r}"
+    assert r[4] == "-" and r[7] == "-", f"expected date format, got {r}"

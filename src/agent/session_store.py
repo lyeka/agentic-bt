@@ -1,5 +1,5 @@
 """
-[INPUT]: json, pathlib
+[INPUT]: json, pathlib, agent.messages
 [OUTPUT]: SessionStore, JsonSessionStore
 [POS]: 会话持久化基础设施（入口无关）：原子写入 + 兼容旧格式
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Protocol
 
 from agent.kernel import Session
+from agent.messages import normalize_history
 
 
 class SessionStore(Protocol):
@@ -30,7 +31,7 @@ class JsonSessionStore(SessionStore):
     JSON SessionStore（原子写入）。
 
     兼容旧格式: {"id": "...", "history": [...]}
-    新格式: {"version": 1, "id": "...", "history": [...], "updated_at": "..."}
+    新格式: {"version": 2, "id": "...", "history": [...], "updated_at": "..."}
     """
 
     path: Path
@@ -48,7 +49,7 @@ class JsonSessionStore(SessionStore):
 
         s = Session(session_id=session_id)
         if isinstance(history, list):
-            s.history = history
+            s.history = normalize_history(history)
         s.repair()
         return s
 
@@ -56,9 +57,9 @@ class JsonSessionStore(SessionStore):
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
         payload = {
-            "version": 1,
+            "version": 2,
             "id": session.id,
-            "history": session.history,
+            "history": normalize_history(session.history),
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -68,4 +69,3 @@ class JsonSessionStore(SessionStore):
             encoding="utf-8",
         )
         tmp.replace(self.path)
-

@@ -1,5 +1,5 @@
 """
-[INPUT]: dataclasses, datetime, typing
+[INPUT]: dataclasses, datetime, typing, agent.messages
 [OUTPUT]: InboundMessage, OutboundRef, IMBackend Protocol
 [POS]: IM backend 抽象层，隔离 Telegram/Discord 等平台差异
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
+from agent.messages import AttachmentRef
+
 
 @dataclass(frozen=True)
 class InboundMessage:
@@ -21,6 +23,7 @@ class InboundMessage:
     text: str
     message_id: str
     ts: datetime
+    attachments: tuple[AttachmentRef, ...] = ()
 
 
 @dataclass(frozen=True)

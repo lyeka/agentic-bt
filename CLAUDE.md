@@ -16,6 +16,9 @@ src/
   core/        - 公共基础包 (4 文件: sandbox/indicators/tracer)
   agenticbt/   - 回测框架 (13 文件，import core/)
   agent/       - 持久投资助手 (Phase 2: runtime + session_store + IM driver + Telegram + TUI 终端界面)
+.agents/
+  skills/      - Agent 技能定义文件
+  subagents/   - 内置子代理定义 (technician 技术分析 + researcher 信息研究)
 scripts/       - 分析脚本 (trace 分析报告)
 examples/      - 策略注册表 + Mock Agent + LLM Prompt（8 策略）
 tests/
@@ -28,7 +31,8 @@ pyproject.toml - Python 包配置（venv: .venv/）
 docs/ - 完整设计文档集 (13 文件: agent-design, architecture, engine, tools, compute, memory, context, eval, agent-protocol, runner, tracer, roadmap, skills)
 src/core/ - 公共基础包 (4 文件: __init__, sandbox, indicators, tracer)
 src/agenticbt/ - 回测框架 (13 文件: __init__, models, engine, indicators, memory, tools, sandbox, context, agent, runner, eval, data, tracer)
-src/agent/ - 持久投资助手（Kernel + context_ops + runtime + session_store + tools + adapters: cli/telegram/im）
+src/agent/ - 持久投资助手（Kernel + context_ops + subagents + runtime + session_store + tools + adapters: cli/telegram/im）
+.agents/subagents/ - 内置子代理定义 (2 文件: technician 技术分析, researcher 信息研究)
 scripts/ - 分析脚本 (1 文件: analyze_trace)
 examples/ - 策略模块 (2 文件: __init__, strategies)
 tests/ - BDD 测试 + E2E（18 features + 19 test_*.py step definitions/e2e + conftest）
@@ -42,6 +46,7 @@ tests/ - BDD 测试 + E2E（18 features + 19 test_*.py step definitions/e2e + co
 | core/sandbox.py | exec_compute 沙箱执行器：eval-first/黑名单 builtins/Trading Coreutils/线程安全超时（主线程 SIGALRM + 非主线程 ThreadPoolExecutor）/自动降维 | docs/compute.md |
 | core/indicators.py | IndicatorEngine，pandas-ta 防前瞻包装，6 指标 | - |
 | core/tracer.py | TraceWriter 本地 JSONL 追踪，对齐 OTel GenAI | docs/tracer.md |
+| core/subagent.py | 领域无关 Sub-Agent 纯函数层：SubAgentDef/SubAgentResult + filter_schemas + run_subagent 通用 ReAct loop（资源管控） | - |
 | **agenticbt/** | | |
 | engine.py | 确定性市场模拟：多资产数据/market+limit+stop+bracket 订单/多空/风控4检查/百分比滑点/部分成交/risk_summary() 风控约束摘要 | docs/engine.md |
 | memory.py | 文件式记忆：Workspace 隔离 + log/note/recall | docs/memory.md |

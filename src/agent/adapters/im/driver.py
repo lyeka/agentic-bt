@@ -17,6 +17,7 @@ from agent.adapters.im.backend import IMBackend, InboundMessage, OutboundRef
 from agent.adapters.im.confirm_bridge import make_sync_confirm
 from agent.adapters.im.progress import ProgressBuffer
 from agent.kernel import Session
+from agent.messages import TurnInput
 from agent.runtime import AgentConfig, KernelBundle, build_kernel_bundle
 
 
@@ -138,7 +139,8 @@ class IMDriver:
     async def handle(self, msg: InboundMessage) -> None:
         # 基础过滤
         text = (msg.text or "").strip()
-        if not text:
+        has_attachments = bool(msg.attachments)
+        if not text and not has_attachments:
             return
 
         if not msg.is_private:
@@ -152,7 +154,7 @@ class IMDriver:
         chat = await self._get_or_create_chat(msg.conversation_id)
         async with chat.lock:
             # commands
-            if text.startswith("/"):
+            if not has_attachments and text.startswith("/"):
                 await self._handle_command(chat, text)
                 return
 
@@ -180,8 +182,11 @@ class IMDriver:
                 chat.status_ref = None
                 chat.status_updater = None
 
+            turn_input: str | TurnInput = text
+            if has_attachments:
+                turn_input = TurnInput(text=text, attachments=msg.attachments)
             try:
-                reply = await asyncio.to_thread(chat.bundle.kernel.turn, text, chat.session)
+                reply = await asyncio.to_thread(chat.bundle.kernel.turn, turn_input, chat.session)
             except Exception as exc:
                 await self._backend.send_text(msg.conversation_id, f"发生错误: {type(exc).__name__}: {exc}")
                 return
@@ -238,7 +243,8 @@ class IMDriver:
 
             before_tokens = estimate_tokens(chat.session.history)
             result = compact_history(
-                client=chat.bundle.kernel.client,
+                provider=getattr(chat.bundle.kernel, "provider", None),
+                client=getattr(chat.bundle.kernel, "client", None),
                 model=self._config.model,
                 history=chat.session.history,
             )

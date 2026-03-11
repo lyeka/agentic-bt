@@ -7,10 +7,11 @@
 
 ## 成员清单
 `__init__.py`: 包入口
-`kernel.py`: Kernel 核心协调器（ReAct loop + _call_llm 统一 LLM 调用（stream/非 stream 双轨）+ wire/emit 声明式管道 + DataStore + Permission 权限 + boot 自举 + Skill Engine 集成 + /skill 显式展开 + skill_invoke 工具 + _assemble_system_prompt 注入 skills 摘要 + auto-compact 自动上下文压缩 + overflow 溢出重试）；Session 会话容器（持久化 save/load + summary 对话摘要）；DataStore 数据注册表；Permission 枚举；MemoryCompressor Protocol；MEMORY_MAX_CHARS = 100_000；WORKSPACE_GUIDE 元认知框架
+`kernel.py`: Kernel 核心协调器（ReAct loop + _call_llm 统一 LLM 调用（stream/非 stream 双轨）+ wire/emit 声明式管道 + DataStore + Permission 权限 + boot 自举 + Skill Engine 集成 + SubAgent System 集成 + /skill 显式展开 + skill_invoke 工具 + _assemble_system_prompt 注入 skills 摘要 + auto-compact 自动上下文压缩 + overflow 溢出重试）；Session 会话容器（持久化 save/load + summary 对话摘要）；DataStore 数据注册表；Permission 枚举；MemoryCompressor Protocol；MEMORY_MAX_CHARS = 100_000；WORKSPACE_GUIDE 元认知框架
 `context_ops.py`: 上下文管理纯函数层（estimate_tokens token 估算 + ContextInfo/context_info 统计 + CompactResult/compact_history 对话压缩 + _llm_compress LLM 摘要生成含 fallback）
 `skills.py`: Agent Skills 引擎（目录发现 + SKILL.md/frontmatter 解析 + 校验诊断 + 重名冲突处理 + `<available_skills>` XML 注入文本生成 + `/skill:name` 命令展开 + skill_invoke 载荷构建）
-`runtime.py`: 入口无关的 Kernel 组装层（AgentConfig + KernelBundle + 统一 tools/permissions/wires/trace/session 路径约定 + MARKET_CN/MARKET_US 显式声明数据源 + _make_adapter 工厂 + Composite 异源组装）
+`subagents.py`: Sub-Agent 集成子系统（文件发现 + frontmatter 解析 + output_protocol 提取 + SubAgentSystem 类：register/remove/invoke/as_tool_defs/team_prompt + ask_{name}/create_subagent/list_subagents 工具生成）
+`runtime.py`: 入口无关的 Kernel 组装层（AgentConfig + KernelBundle + 统一 tools/permissions/wires/trace/session/subagents 路径约定 + MARKET_CN/MARKET_US 显式声明数据源 + _make_adapter 工厂 + Composite 异源组装）
 `session_store.py`: SessionStore 抽象 + JsonSessionStore（兼容旧格式 + 原子写）
 
 ### tools/

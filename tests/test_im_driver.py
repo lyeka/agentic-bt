@@ -20,6 +20,7 @@ from pytest_bdd import given, parsers, scenario, then, when
 from agent.adapters.im.backend import InboundMessage, OutboundRef
 from agent.adapters.im.driver import IMDriver
 from agent.kernel import Session
+from agent.messages import AttachmentRef, TurnInput
 from agent.runtime import AgentConfig, KernelBundle
 
 
@@ -67,6 +68,7 @@ class FakeKernel:
         self._wires: dict[str, list] = defaultdict(list)
         self._confirm_handler = None
         self.turn_calls = 0
+        self.last_input = None
         # mock client for compact_history
         self.client = SimpleNamespace(
             chat=SimpleNamespace(
@@ -95,19 +97,24 @@ class FakeKernel:
             return True
         return bool(self._confirm_handler(path))
 
-    def turn(self, user_input: str, session: Session) -> str:
+    def turn(self, user_input: str | TurnInput, session: Session) -> str:
         self.turn_calls += 1
-        session.history.append({"role": "user", "content": user_input})
+        self.last_input = user_input
+        if isinstance(user_input, TurnInput):
+            user_text = user_input.text or "[attachment]"
+        else:
+            user_text = user_input
+        session.history.append({"role": "user", "content": user_text})
 
-        if user_input == "run":
-            self.emit("tool.call.start", {"name": "echo", "args": {"text": user_input}})
-            self.emit("tool:echo", {"args": {"text": user_input}, "result": {"echo": user_input}})
+        if user_text == "run":
+            self.emit("tool.call.start", {"name": "echo", "args": {"text": user_text}})
+            self.emit("tool:echo", {"args": {"text": user_text}, "result": {"echo": user_text}})
 
-        if user_input == "confirm":
+        if user_text == "confirm":
             ok = self.request_confirm("soul.md")
             reply = "confirmed" if ok else "denied"
         else:
-            reply = f"reply:{user_input}"
+            reply = f"reply:{user_text}"
 
         session.history.append({"role": "assistant", "content": reply})
         return reply
@@ -345,3 +352,38 @@ def then_session_history_empty(imctx, conv):
 def then_backend_sent_text_containing(imctx, needle):
     texts = [t for _cid, t in imctx["backend"].sent]
     assert any(needle in t for t in texts), f"未找到包含 '{needle}' 的消息，所有消息: {texts}"
+
+
+def test_image_only_message_invokes_kernel(tmp_path):
+    imctx = given_backend(tmp_path)
+    imctx = given_default_driver(imctx, "u1")
+    driver: IMDriver = imctx["driver"]
+
+    msg = InboundMessage(
+        adapter="test",
+        conversation_id="img1",
+        user_id="u1",
+        is_private=True,
+        text="",
+        message_id="m-image",
+        ts=datetime.now(),
+        attachments=(
+            AttachmentRef(
+                kind="image",
+                path=str(tmp_path / "image.jpg"),
+                mime_type="image/jpeg",
+                source_id="img-source",
+            ),
+        ),
+    )
+
+    async def _run() -> None:
+        await driver.handle(msg)
+        await asyncio.sleep(0)
+
+    asyncio.run(_run())
+
+    kernel = imctx["kernels"]["img1"]
+    assert kernel.turn_calls == 1
+    assert isinstance(kernel.last_input, TurnInput)
+    assert kernel.last_input.attachments[0].kind == "image"

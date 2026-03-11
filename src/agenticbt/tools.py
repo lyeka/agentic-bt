@@ -242,6 +242,8 @@ _SCHEMAS = [
                 "可选参数: symbol(股票代码，默认主资产)，用于选择本次 compute 的数据源。"
                 "示例(自定义指标): result={'rsi':ta.rsi(close,14), "
                 "'factor':close.pct_change(10)/(close.pct_change().rolling(20).std()+1e-9)}"
+                " 注意: 不要写 import(已预注入)；不要 def 函数(用内联表达式)；不要文件 I/O；"
+                "代码保持 5-20 行 REPL 风格。用 bbands()/macd() helper 而非 ta.bbands()/ta.macd()。"
             ),
             "parameters": {
                 "type": "object",

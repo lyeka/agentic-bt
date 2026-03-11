@@ -53,7 +53,7 @@
 `test_web_tools.py`: web_tools.feature step definitions（fixture: wctx，MockSearchAdapter + patch _fetch_url）
 `features/context_ops.feature`: 上下文管理行为规格（7 scenarios：token估算/统计/短历史不压缩/压缩返回摘要/保留原样/结构化摘要）
 `test_context_ops.py`: context_ops.feature step definitions（fixture: coctx，mock LLM client）
-`features/tui.feature`: TUI 终端界面行为规格（9 scenarios：消息收发/空输入/确认对话框/工具进度/历史恢复/流式输出/新建会话/耗时元数据/异常错误提示）
-`test_tui.py`: tui.feature step definitions（fixture: tuictx，FakeKernel + MemorySessionStore + Textual app.run_test）
+`features/subagent.feature`: Sub-Agent 子代理系统行为规格（26 scenarios：文件发现/frontmatter 解析/名称冲突/output_protocol 提取/filter_schemas 纯函数/基础委派/工具调用/轮次耗尽/LLM 失败/output_guide 注入/元数据/工具隔离白名单黑名单防递归/token 预算/超时/生命周期注册移除上限/team_prompt/Kernel 集成/内置子代理加载验证 technician+researcher）
+`test_subagent.py`: subagent.feature step definitions（fixture: sactx，Mock LLM + SubAgentSystem + Kernel 集成 + 内置子代理加载）
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
