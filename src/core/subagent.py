@@ -1,7 +1,7 @@
 """
-[INPUT]: dataclasses, json, time
+[INPUT]: dataclasses, json, time, uuid
 [OUTPUT]: SubAgentDef, SubAgentResult, filter_schemas, run_subagent
-[POS]: 领域无关的 Sub-Agent 纯函数层：数据类型 + 通用 ReAct loop + 资源管控。不依赖 agent 包
+[POS]: 领域无关的 Sub-Agent 纯函数层：数据类型 + 通用 ReAct loop + 资源管控。不依赖 agent 包，provider 由调用方注入
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -13,7 +13,6 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 from uuid import uuid4
 
-from agent.providers import OpenAIChatProvider
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -98,8 +97,7 @@ def run_subagent(
     definition: SubAgentDef,
     task: str,
     context: str = "",
-    provider: Any | None = None,
-    client: Any | None = None,
+    provider: Any,
     model: str,
     tool_schemas: list[dict],
     tool_executor: Callable[[str, dict], Any],
@@ -114,7 +112,7 @@ def run_subagent(
     3. token_budget / timeout / max_rounds 资源管控
     """
     defn = definition
-    use_provider = provider or OpenAIChatProvider(client=client)
+    use_provider = provider
     use_model = defn.model or model
     system = _build_system_prompt(defn)
 

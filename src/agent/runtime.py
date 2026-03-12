@@ -1,5 +1,5 @@
 """
-[INPUT]: os, pathlib, agent.kernel, agent.tools, agent.adapters.market.{tushare,yfinance,finnhub,composite}, agent.adapters.web.tavily, agent.session_store, agent.providers, core.subagent
+[INPUT]: os, pathlib, agent.kernel, agent.tools, agent.session_store, agent.providers, core.subagent（market adapters 仅 lazy import）
 [OUTPUT]: AgentConfig, KernelBundle, build_kernel_bundle
 [POS]: 入口无关的 Kernel 组装层：统一 tools/permission/wire/trace/session_store/subagent 路径约定
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -17,9 +17,6 @@ from typing import Callable
 from agent.kernel import Kernel, MEMORY_MAX_CHARS, Permission
 from agent.providers import LLMProvider, OpenAIChatProvider
 from agent.session_store import JsonSessionStore, SessionStore
-from agent.adapters.market.tushare import TushareAdapter
-from agent.adapters.market.yfinance import YFinanceAdapter
-from agent.adapters.market.composite import CompositeMarketAdapter, is_ashare
 from agent.tools import bash, compute, edit, market, read, web, write
 from core.subagent import SubAgentDef
 
@@ -38,6 +35,7 @@ class AgentConfig:
     enable_bash: bool = True
     context_window: int = 100_000
     compact_recent_turns: int = 3
+    session_keep_last_user_messages: int = 20
     search_provider: str = "tavily"
     tavily_api_key: str | None = None
     image_detail: str = "low"
@@ -57,6 +55,7 @@ class AgentConfig:
         enable_bash = os.getenv("ENABLE_BASH", "1").strip().lower() not in ("0", "false", "no", "n")
         context_window = int(os.getenv("CONTEXT_WINDOW", "100000"))
         compact_recent_turns = int(os.getenv("COMPACT_RECENT_TURNS", "3"))
+        session_keep_last = int(os.getenv("SESSION_KEEP_LAST_USER_MESSAGES", "20"))
         search_provider = os.getenv("SEARCH_PROVIDER", "tavily")
         tavily_api_key = os.getenv("TAVILY_API_KEY") or None
         image_detail = (os.getenv("IMAGE_DETAIL") or "low").strip().lower() or "low"
@@ -73,6 +72,7 @@ class AgentConfig:
             enable_bash=enable_bash,
             context_window=context_window,
             compact_recent_turns=compact_recent_turns,
+            session_keep_last_user_messages=session_keep_last,
             search_provider=search_provider,
             tavily_api_key=tavily_api_key,
             image_detail=image_detail,
@@ -153,10 +153,12 @@ def _on_memory_write(kernel: Kernel, workspace: Path, compressor: LLMCompressor)
 
 
 def _make_adapter(name: str, config: AgentConfig) -> object:
-    """按名称构造 MarketAdapter 实例"""
+    """按名称构造 MarketAdapter 实例（lazy import — 未使用的数据源不构成启动硬依赖）"""
     if name == "tushare":
+        from agent.adapters.market.tushare import TushareAdapter
         return TushareAdapter(token=config.tushare_token)
     if name == "yfinance":
+        from agent.adapters.market.yfinance import YFinanceAdapter
         return YFinanceAdapter()
     if name == "finnhub":
         from agent.adapters.market.finnhub import FinnhubAdapter
@@ -199,6 +201,7 @@ def build_kernel_bundle(
     if config.market_cn == config.market_us:
         market.register(kernel, cn)
     else:
+        from agent.adapters.market.composite import CompositeMarketAdapter, is_ashare
         composite = CompositeMarketAdapter()
         composite.route(is_ashare, cn)
         composite.fallback(us)

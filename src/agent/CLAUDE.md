@@ -7,7 +7,7 @@
 
 ## 成员清单
 `__init__.py`: 包入口
-`kernel.py`: Kernel 核心协调器（ReAct loop + wire/emit 声明式管道 + DataStore + Permission 权限 + boot 自举 + Skill Engine 集成 + SubAgent System 集成 + /skill 显式展开 + skill_invoke 工具 + _assemble_system_prompt 注入 skills/team 摘要 + auto-compact 自动上下文压缩 + overflow 溢出重试）；Session 会话容器（持久化 save/load + summary 对话摘要）；DataStore 数据注册表；Permission 枚举；MemoryCompressor Protocol；MEMORY_MAX_CHARS = 100_000；WORKSPACE_GUIDE 元认知框架
+`kernel.py`: Kernel 核心协调器（ReAct loop + _call_llm 统一 LLM 调用（stream/非 stream 双轨）+ wire/emit 声明式管道 + DataStore + Permission 权限 + boot 自举 + Skill Engine 集成 + SubAgent System 集成 + /skill 显式展开 + skill_invoke 工具 + _assemble_system_prompt 注入 skills 摘要 + auto-compact 自动上下文压缩 + overflow 溢出重试）；Session 会话容器（持久化 save/load + summary 对话摘要）；DataStore 数据注册表；Permission 枚举；MemoryCompressor Protocol；MEMORY_MAX_CHARS = 100_000；WORKSPACE_GUIDE 元认知框架
 `context_ops.py`: 上下文管理纯函数层（estimate_tokens token 估算 + ContextInfo/context_info 统计 + CompactResult/compact_history 对话压缩 + _llm_compress LLM 摘要生成含 fallback）
 `skills.py`: Agent Skills 引擎（目录发现 + SKILL.md/frontmatter 解析 + 校验诊断 + 重名冲突处理 + `<available_skills>` XML 注入文本生成 + `/skill:name` 命令展开 + skill_invoke 载荷构建）
 `subagents.py`: Sub-Agent 集成子系统（文件发现 + frontmatter 解析 + output_protocol 提取 + SubAgentSystem 类：register/remove/invoke/as_tool_defs/team_prompt + ask_{name}/create_subagent/list_subagents 工具生成）
@@ -30,6 +30,15 @@
 `__init__.py`: 适配器层入口
 `cli.py`: CLI REPL 入口（dotenv + runtime 统一组装 + state_dir Session 持久化 + 旧会话迁移 + /new /compact /context /help 命令路由）
 `telegram.py`: Telegram Bot 入口（polling + allowlist + InboundMessage 映射 + IMDriver 驱动 + markdown->HTML 基础渲染 + 过程消息开关）
+
+### adapters/tui/
+`__init__.py`: TUI 终端界面包入口
+`app.py`: InvestmentApp(App) — Textual TUI 主界面（布局/ChatInput/UserSubmitted 消息/worker 线程 kernel.turn + try/except 错误展示/流式渲染 llm.chunk→StreamingMarkdown/工具状态原地更新（⚙→✓）/精准 workspace wire（tool:write+edit）/confirm 桥接+超时通知/SidebarPanel 多 Tab + 每轮刷新/会话管理+widget 引用清理/耗时元数据/Escape 焦点回输入）
+`widgets.py`: StreamingMarkdown(Markdown) — 流式 Markdown 渲染（chunk 累积 + 80ms 防抖 + finalize 终结）
+`sidebar.py`: SidebarPanel(Vertical) — 增强侧边栏（TabbedContent 三 Tab：概况/持仓/行情 + refresh_profile/portfolio/market 方法）
+`screens.py`: ConfirmScreen(ModalScreen) — 文件写入确认对话框（y/n 快捷键 + Horizontal 按钮容器）
+`commands.py`: AppCommandProvider(Provider) — 命令面板（新建会话/重置会话+widget 引用清理/切换侧边栏/查看状态/6 主题切换/退出）
+`app.tcss`: TUI CSS 样式（布局/消息气泡/耗时元数据/错误提示/侧边栏 TabbedContent/输入区）
 
 ### adapters/im/
 `__init__.py`: IM 通用驱动层入口
