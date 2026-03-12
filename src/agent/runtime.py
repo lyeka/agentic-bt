@@ -1,5 +1,5 @@
 """
-[INPUT]: os, pathlib, agent.kernel, agent.tools, agent.adapters.market.{tushare,yfinance,finnhub,composite}, agent.adapters.web.tavily, agent.session_store, agent.providers, core.subagent
+[INPUT]: os, pathlib, agent.kernel, agent.tools, agent.session_store, agent.providers, core.subagent（market adapters 仅 lazy import）
 [OUTPUT]: AgentConfig, KernelBundle, build_kernel_bundle
 [POS]: 入口无关的 Kernel 组装层：统一 tools/permission/wire/trace/session_store/subagent 路径约定
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -17,9 +17,6 @@ from typing import Callable
 from agent.kernel import Kernel, MEMORY_MAX_CHARS, Permission
 from agent.providers import LLMProvider, OpenAIChatProvider
 from agent.session_store import JsonSessionStore, SessionStore
-from agent.adapters.market.tushare import TushareAdapter
-from agent.adapters.market.yfinance import YFinanceAdapter
-from agent.adapters.market.composite import CompositeMarketAdapter, is_ashare
 from agent.tools import bash, compute, edit, market, read, web, write
 from core.subagent import SubAgentDef
 

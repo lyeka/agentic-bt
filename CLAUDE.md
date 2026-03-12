@@ -220,7 +220,7 @@ def then_xxx(ctx, ...):
 
 ## 开发状态
 
-262 tests 全绿。agent 持久投资助手进入 Phase 2（runtime 统一组装 + SessionStore + IMDriver + Telegram polling 入口 + 会话上下文管理：auto-compact/overflow recovery/手动 compact/context 统计）。TUI 终端界面全面升级（Kernel._call_llm 流式双轨 + StreamingMarkdown 防抖渲染 + SidebarPanel TabbedContent 三 Tab + 6 主题切换 + 新建会话+归档 + 耗时元数据 + Escape 焦点回输入 + PR Review 修复：异常展示/工具状态原地更新/精准 workspace wire/confirm 超时通知/session.prune 移除让 compact 独管历史/widget 引用清理防悬垂）。agenticbt 回测框架完成（确定性引擎 + 多资产 + bracket/limit/stop + 风控 + 11 工具）。美股数据接入完成（yfinance 默认 + Finnhub 后备 + Composite 多源路由 + MARKET_CN/MARKET_US 显式声明）。compute 沙箱线程安全（signal + ThreadPoolExecutor 双轨），market_ohlcv 返回原始 OHLCV（LLM 直接推理）。项目重心继续在 Phase 2（Discord/Webhook/定时任务）。
+230+ tests 全绿。agent 持久投资助手 Phase 2（runtime 统一组装 + SessionStore + IMDriver + Telegram + LLMProvider 抽象 + SubAgent 子代理系统 + Skills 技能引擎）。Kernel 修复：_do_llm_call 统一入口 + _stream_complete 流式渲染（provider.complete 非流式 / client streaming 双轨）+ tc.id dataclass 属性访问 + 死代码清除。runtime.py 恢复 lazy import（market adapters 不再硬依赖 tushare/yfinance）。core/subagent.py 消除 agent.providers 循环依赖（provider 由调用方注入）。cli.py compact_history 参数对齐 provider=。TUI 终端界面（StreamingMarkdown 防抖 + SidebarPanel + 主题切换 + 异常展示 + 工具状态原地更新）。agenticbt 回测框架完成。美股数据接入完成（yfinance + Finnhub + Composite）。
 路线图：docs/roadmap.md
 
 # currentDate

@@ -1,7 +1,7 @@
 """
-[INPUT]: json, pathlib, enum, agent.skills, agent.subagents, agent.messages, agent.providers
-[OUTPUT]: Kernel — 核心协调器；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；skill_invoke
-[POS]: agent 包核心，系统唯一协调中心：ReAct loop + 声明式 wire/emit + DataStore + 权限 + 自举 + Skill Engine + SubAgent System
+[INPUT]: json, pathlib, enum, agent.skills, agent.subagents, agent.messages, agent.providers (LLMProvider/LLMResult/LLMToolCall/OpenAIChatProvider)
+[OUTPUT]: Kernel — 核心协调器（_do_llm_call 统一入口 + _stream_complete 流式）；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；skill_invoke
+[POS]: agent 包核心，系统唯一协调中心：ReAct loop + 声明式 wire/emit + DataStore + 权限 + 自举 + Skill Engine + SubAgent System + stream/非 stream 双轨 LLM 调用
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Protocol
 
 from agent.messages import TurnInput, build_user_message, ensure_turn_input, normalize_history, render_turn_input
-from agent.providers import LLMProvider, OpenAIChatProvider, message_to_dict
+from agent.providers import LLMProvider, LLMResult, LLMToolCall, OpenAIChatProvider
 from agent.skills import (
     Skill,
     build_available_skills_prompt,
@@ -191,6 +191,7 @@ class Kernel:
             api_key=api_key,
         )
         self.client = getattr(self.provider, "client", None)
+        self.stream = False
         self.data = DataStore()
         self._tools: dict[str, ToolDef] = {}
         self._wires: defaultdict[str, list[Callable]] = defaultdict(list)
@@ -505,19 +506,60 @@ class Kernel:
 
     # ── LLM 调用 ─────────────────────────────────────────────────────────────
 
-    def _call_llm(
-        self, kwargs: dict[str, Any], round_num: int,
-    ) -> tuple[dict, str, int]:
-        """执行 LLM 调用（支持流式），返回 (msg_dict, finish_reason, tokens)。"""
+    def _do_llm_call(
+        self,
+        *,
+        round_num: int,
+        model: str,
+        messages: list[dict],
+        tools: list[dict] | None,
+    ) -> LLMResult:
+        """LLM 调用统一入口：stream / 非 stream 双轨，返回统一 LLMResult。"""
         self.emit("llm.call.start", {"round": round_num})
 
-        if not self.stream:
-            response = self.client.chat.completions.create(**kwargs)
-            choice = response.choices[0]
-            tokens = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
-            return _msg_to_dict(choice.message), choice.finish_reason, tokens
+        try:
+            if self.stream and self.client is not None:
+                result = self._stream_complete(
+                    model=model, messages=messages,
+                    tools=tools, round_num=round_num,
+                )
+            else:
+                result = self.provider.complete(
+                    model=model, messages=messages, tools=tools,
+                )
+        except Exception as exc:
+            self.emit("llm.call.error", {
+                "round": round_num,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+            })
+            raise
 
-        kwargs = {**kwargs, "stream": True}
+        self.emit("llm.call.done", {
+            "round": round_num,
+            "finish_reason": result.finish_reason,
+            "total_tokens": result.usage_total_tokens,
+        })
+        return result
+
+    def _stream_complete(
+        self,
+        *,
+        model: str,
+        messages: list[dict],
+        tools: list[dict] | None,
+        round_num: int,
+    ) -> LLMResult:
+        """OpenAI streaming：逐 chunk 推送 llm.chunk 事件，返回统一 LLMResult。"""
+        compiled = (
+            self.provider.compile_messages(messages)
+            if hasattr(self.provider, "compile_messages")
+            else messages
+        )
+        kwargs: dict[str, Any] = {"model": model, "messages": compiled, "stream": True}
+        if tools:
+            kwargs["tools"] = tools
+
         chunks = self.client.chat.completions.create(**kwargs)
         parts: list[str] = []
         tc_acc: dict[int, dict] = {}
@@ -546,16 +588,20 @@ class Kernel:
                             tc_acc[idx]["arguments"] += tc.function.arguments
 
         msg: dict[str, Any] = {"role": "assistant", "content": "".join(parts) or None}
-        if tc_acc:
-            msg["tool_calls"] = [
-                {
-                    "id": v["id"],
-                    "type": "function",
-                    "function": {"name": v["name"], "arguments": v["arguments"]},
-                }
-                for v in tc_acc.values()
-            ]
-        return msg, finish_reason, 0
+        tool_calls: list[LLMToolCall] = []
+        for v in tc_acc.values():
+            msg.setdefault("tool_calls", []).append({
+                "id": v["id"], "type": "function",
+                "function": {"name": v["name"], "arguments": v["arguments"]},
+            })
+            tool_calls.append(LLMToolCall(id=v["id"], name=v["name"], arguments=v["arguments"]))
+
+        return LLMResult(
+            assistant_message=msg,
+            finish_reason=finish_reason,
+            tool_calls=tool_calls,
+            usage_total_tokens=0,
+        )
 
     # ── ReAct loop ────────────────────────────────────────────────────────────
 
@@ -644,32 +690,12 @@ class Kernel:
         for i in range(self.max_rounds):
             round_num = i + 1
             self.emit("turn.round", {"round": round_num, "max": self.max_rounds})
-            kwargs: dict[str, Any] = {
-                "model": self.model,
-                "messages": prefix + session.history,
-            }
 
-            self.emit("llm.call.start", {"round": round_num})
-            try:
-                response = self.provider.complete(
-                    model=kwargs["model"],
-                    messages=kwargs["messages"],
-                    tools=tool_schemas,
-                )
-            except Exception as exc:
-                self.emit("llm.call.error", {
-                    "round": round_num,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                })
-                raise
-            self.emit(
-                "llm.call.done",
-                {
-                    "round": round_num,
-                    "finish_reason": response.finish_reason,
-                    "total_tokens": response.usage_total_tokens,
-                },
+            response = self._do_llm_call(
+                round_num=round_num,
+                model=self.model,
+                messages=prefix + session.history,
+                tools=tool_schemas,
             )
 
             # 存储 assistant 消息
@@ -741,7 +767,7 @@ class Kernel:
 
                     session.history.append({
                         "role": "tool",
-                        "tool_call_id": tc["id"],
+                        "tool_call_id": tc.id,
                         "content": json.dumps(result, default=str),
                     })
         else:
@@ -751,12 +777,3 @@ class Kernel:
 
         self.emit("turn.done", {"input": render_turn_input(turn_input), "reply": reply})
         return reply
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# 辅助
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _msg_to_dict(msg: Any) -> dict:
-    """兼容测试：provider 层统一的 message 归一化函数。"""
-    return message_to_dict(msg)

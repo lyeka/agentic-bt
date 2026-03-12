@@ -91,7 +91,7 @@ def _simple_repl(
 
                 before_tokens = estimate_tokens(session.history)
                 result = compact_history(
-                    client=kernel.client, model=kernel.model,
+                    provider=kernel.provider, model=kernel.model,
                     history=session.history,
                 )
                 session.history = result.retained
