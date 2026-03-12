@@ -17,6 +17,8 @@ def register(kernel: object, workspace: Path, cwd: Path) -> None:
 
     def write_handler(args: dict) -> dict:
         raw = args["path"]
+        if raw.startswith("automation/tasks/") or raw == "automation/tasks":
+            return {"error": "automation/tasks/** 只能通过 task_apply 修改", "path": raw}
         path = resolve_path(workspace, raw)
 
         err = check_write_permission(kernel, raw, path, workspace, cwd)

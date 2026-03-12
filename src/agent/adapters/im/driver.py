@@ -17,7 +17,8 @@ from agent.adapters.im.backend import IMBackend, InboundMessage, OutboundRef
 from agent.adapters.im.confirm_bridge import make_sync_confirm
 from agent.adapters.im.progress import ProgressBuffer
 from agent.kernel import Session
-from agent.messages import TurnInput
+from agent.messages import ContextRef, TurnInput
+from agent.automation.store import AutomationStore
 from agent.runtime import AgentConfig, KernelBundle, build_kernel_bundle
 
 
@@ -185,6 +186,10 @@ class IMDriver:
             turn_input: str | TurnInput = text
             if has_attachments:
                 turn_input = TurnInput(text=text, attachments=msg.attachments)
+            refs = self._reply_refs(chat, msg)
+            if refs:
+                base = turn_input if isinstance(turn_input, TurnInput) else TurnInput(text=str(turn_input))
+                turn_input = TurnInput(text=base.text, attachments=base.attachments, refs=refs)
             try:
                 reply = await asyncio.to_thread(chat.bundle.kernel.turn, turn_input, chat.session)
             except Exception as exc:
@@ -341,6 +346,22 @@ class IMDriver:
 
         self._chats[conversation_id] = chat
         return chat
+
+    def _reply_refs(self, chat: ChatState, msg: InboundMessage) -> tuple[ContextRef, ...]:
+        if not msg.reply_to_message_id:
+            return ()
+        store = AutomationStore(workspace=chat.bundle.workspace, state=chat.bundle.state)
+        receipt = store.find_receipt(
+            channel=self._adapter_name,
+            target=chat.conversation_id,
+            outbound_message_id=msg.reply_to_message_id,
+        )
+        if receipt is None:
+            return ()
+        return (
+            ContextRef(kind="automation_task", value=receipt.task_id),
+            ContextRef(kind="automation_run", value=receipt.run_id),
+        )
 
     def _handle_kernel_event(self, chat: ChatState, event: str, data: object) -> None:
         if event == "turn.round":

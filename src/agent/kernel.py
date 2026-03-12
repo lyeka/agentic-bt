@@ -1,6 +1,6 @@
 """
 [INPUT]: json, pathlib, enum, agent.skills, agent.subagents, agent.messages, agent.providers (LLMProvider/LLMResult/LLMToolCall/OpenAIChatProvider)
-[OUTPUT]: Kernel — 核心协调器（_do_llm_call 统一入口 + _stream_complete 流式）；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；skill_invoke
+[OUTPUT]: Kernel — 核心协调器（_do_llm_call 统一入口 + _stream_complete 流式 + tool policy + per-turn execution context）；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；skill_invoke
 [POS]: agent 包核心，系统唯一协调中心：ReAct loop + 声明式 wire/emit + DataStore + 权限 + 自举 + Skill Engine + SubAgent System + stream/非 stream 双轨 LLM 调用
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -17,7 +17,7 @@ from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any, Callable, Protocol
 
-from agent.messages import TurnInput, build_user_message, ensure_turn_input, normalize_history, render_turn_input
+from agent.messages import ContextRef, TurnInput, build_user_message, ensure_turn_input, normalize_history, render_turn_input
 from agent.providers import LLMProvider, LLMResult, LLMToolCall, OpenAIChatProvider
 from agent.skills import (
     Skill,
@@ -57,6 +57,43 @@ notebook/ — 你的工作台。研究报告、分析草稿、临时笔记。
   自由使用，无容量限制。适合阶段性产出和探索性工作。
 </workspace>"""
 
+AUTOMATION_GUIDE = """\
+<automation_tools>
+当你要创建自动化任务时，严格遵循以下规则：
+
+1. 先调用 task_plan，拿到 draft_id 之后，再调用 task_apply。不要直接调用 task_apply。
+2. task_plan 的 task 必须使用 canonical 字段：
+   - 顶层：name / description / trigger / reaction / delivery
+   - 不要使用：schedule / steps / output / pipeline / action
+3. cron 任务的 trigger 写法固定为：
+   {
+     "type": "cron",
+     "cron_expr": "53 21 * * 0-4",
+     "timezone": "Asia/Shanghai"
+   }
+   不要写 trigger.cron，不要写 schedule.at/days。
+4. 价格监控任务的 trigger 写法固定为：
+   {
+     "type": "price_threshold",
+     "symbol": "AAPL",
+     "interval": "1m",
+     "condition": "cross_above",
+     "threshold": 220,
+     "poll_sec": 60
+   }
+5. reaction 不是 step workflow。不要写一串 tools/steps。
+   只写：
+   - executor.type: main_agent / skill / subagent
+   - executor.name: 仅 skill/subagent 需要
+   - prompt_template: 触发后要 agent 做什么
+   如果触发后需要 market_ohlcv、compute、research 等能力，让 reaction 里的 agent 自己决定调用。
+6. delivery 只描述投递，不描述分析流程。
+7. 如果 task_plan 报字段错误，优先检查：
+   - 是否误写了 schedule 而不是 trigger
+   - 是否误写了 cron 而不是 cron_expr
+   - 是否误写了 steps/output
+</automation_tools>"""
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # MemoryCompressor Protocol
@@ -65,6 +102,12 @@ notebook/ — 你的工作台。研究报告、分析草稿、临时笔记。
 class MemoryCompressor(Protocol):
     """记忆压缩策略接口。这一版: LLM。未来: embeddings/rules/etc."""
     def compress(self, content: str, limit: int) -> str: ...
+
+
+class ToolAccessPolicy(Protocol):
+    """工具访问控制。返回错误字符串表示拒绝。"""
+
+    def authorize(self, name: str, args: dict[str, Any]) -> str | None: ...
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -153,6 +196,19 @@ class DataStore:
         return self._store.get(key)
 
 
+@dataclass(frozen=True)
+class ExecutionContext:
+    """单轮执行上下文。"""
+
+    refs: tuple[ContextRef, ...] = ()
+
+    def first_ref(self, kind: str) -> ContextRef | None:
+        for ref in self.refs:
+            if ref.kind == kind:
+                return ref
+        return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Kernel
 # ─────────────────────────────────────────────────────────────────────────────
@@ -202,6 +258,8 @@ class Kernel:
         self._skills: dict[str, Skill] = {}
         self._skill_diagnostics: list[dict[str, str]] = []
         self._subagent_system: SubAgentSystem | None = None
+        self._tool_policy: ToolAccessPolicy | None = None
+        self._execution_context = ExecutionContext()
 
     @property
     def client(self) -> Any | None:
@@ -239,7 +297,7 @@ class Kernel:
         else:
             from agent.bootstrap.seed import SEED_PROMPT
             identity = SEED_PROMPT
-        parts = [identity, WORKSPACE_GUIDE]
+        parts = [identity, WORKSPACE_GUIDE, AUTOMATION_GUIDE]
         skills_xml = build_available_skills_prompt(self._skills)
         if skills_xml and ("read" in self._tools or "skill_invoke" in self._tools):
             parts.append(skills_xml)
@@ -415,10 +473,7 @@ class Kernel:
         tool_def = self._tools.get(name)
         if tool_def is None:
             return {"error": f"未知工具: {name}"}
-        try:
-            return tool_def.handler(args)
-        except Exception as exc:
-            return {"error": f"{type(exc).__name__}: {exc}"}
+        return self._call_tool(name, tool_def, args)
 
     def _inject_subagent_tools(self) -> None:
         """将 SubAgentSystem 生成的工具注入 Kernel"""
@@ -484,6 +539,14 @@ class Kernel:
     def on_confirm(self, handler: Callable[[str], bool]) -> None:
         """注册确认回调（CLI 弹 y/n 等）"""
         self._confirm_handler = handler
+
+    def set_tool_policy(self, policy: ToolAccessPolicy | None) -> None:
+        """设置当前 Kernel 的工具访问策略。"""
+        self._tool_policy = policy
+
+    def execution_context(self) -> ExecutionContext:
+        """返回当前单轮执行上下文。"""
+        return self._execution_context
 
     def request_confirm(self, path: str) -> bool:
         """请求用户确认。无 handler 时默认放行（yolo）"""
@@ -603,76 +666,52 @@ class Kernel:
             usage_total_tokens=0,
         )
 
+    def _call_tool(self, name: str, tool_def: ToolDef, args: dict) -> Any:
+        if self._tool_policy is not None:
+            denied = self._tool_policy.authorize(name, args)
+            if denied:
+                return {"error": denied}
+        try:
+            return tool_def.handler(args)
+        except Exception as exc:
+            return {"error": f"{type(exc).__name__}: {exc}"}
+
     # ── ReAct loop ────────────────────────────────────────────────────────────
 
     def turn(self, user_input: str | TurnInput, session: Session) -> str:
         """核心：接收用户输入 → ReAct loop → 返回回复"""
-        today = datetime.now().strftime("%Y-%m-%d")
+        previous_ctx = self._execution_context
         turn_input = ensure_turn_input(user_input)
-        self.emit("turn.start", {"input": render_turn_input(turn_input)})
-        expanded, expand_error, skill_name = expand_explicit_skill_command(
-            user_input=turn_input.text,
-            skills=self._skills,
-        )
-        final_turn_input = TurnInput(
-            text=expanded or turn_input.text,
-            attachments=turn_input.attachments,
-        )
-        session.history.append(build_user_message(final_turn_input, date_str=today))
-
-        if expand_error:
-            session.history.append({"role": "assistant", "content": expand_error})
-            self.emit(
-                "skill.expand.error",
-                {"input": turn_input.text, "skill": skill_name, "error": expand_error},
+        self._execution_context = ExecutionContext(refs=turn_input.refs)
+        today = datetime.now().strftime("%Y-%m-%d")
+        try:
+            self.emit("turn.start", {"input": render_turn_input(turn_input)})
+            expanded, expand_error, skill_name = expand_explicit_skill_command(
+                user_input=turn_input.text,
+                skills=self._skills,
             )
-            self.emit("turn.done", {"input": render_turn_input(turn_input), "reply": expand_error})
-            return expand_error
-
-        if expanded:
-            self.emit("skill.expanded", {"input": turn_input.text, "skill": skill_name})
-
-        tool_schemas = [t.schema for t in self._tools.values()] or None
-
-        # prefix: system prompt + 对话摘要注入
-        system_content = self._system_prompt or ""
-        if session.summary:
-            system_content += (
-                "\n\n## 前段对话摘要\n"
-                "以下是之前对话的压缩摘要，不是新消息。基于此背景继续对话：\n\n"
-                f"{session.summary}"
+            final_turn_input = TurnInput(
+                text=expanded or turn_input.text,
+                attachments=turn_input.attachments,
+                refs=turn_input.refs,
             )
-        prefix = (
-            [{"role": "system", "content": system_content}]
-            if system_content else []
-        )
+            session.history.append(build_user_message(final_turn_input, date_str=today))
 
-        # 自动压缩：token > 75% context window 时触发
-        from agent.context_ops import estimate_tokens, compact_history
-
-        est = estimate_tokens(prefix + session.history)
-        if est > int(self.context_window * 0.75):
-            result = compact_history(
-                provider=self.provider, model=self.model,
-                history=session.history, recent_turns=self.compact_recent_turns,
-            )
-            session.history = result.retained
-            if result.summary:
-                session.summary = (
-                    f"{session.summary}\n\n{result.summary}" if session.summary else result.summary
+            if expand_error:
+                session.history.append({"role": "assistant", "content": expand_error})
+                self.emit(
+                    "skill.expand.error",
+                    {"input": turn_input.text, "skill": skill_name, "error": expand_error},
                 )
-            self.emit("context.compacted", {
-                "trigger": "auto",
-                "messages_before": result.compressed_count + result.retained_count,
-                "messages_after": result.retained_count,
-                "messages_compressed": result.compressed_count,
-                "messages_retained": result.retained_count,
-                "tokens_before": est,
-                "tokens_after": estimate_tokens(prefix + session.history),
-                "summary_chars": len(result.summary),
-                "summary": result.summary,
-            })
-            # 重建 prefix（摘要可能已变）
+                self.emit("turn.done", {"input": render_turn_input(turn_input), "reply": expand_error})
+                return expand_error
+
+            if expanded:
+                self.emit("skill.expanded", {"input": turn_input.text, "skill": skill_name})
+
+            tool_schemas = [t.schema for t in self._tools.values()] or None
+
+            # prefix: system prompt + 对话摘要注入
             system_content = self._system_prompt or ""
             if session.summary:
                 system_content += (
@@ -685,30 +724,11 @@ class Kernel:
                 if system_content else []
             )
 
-        reply = ""
+            # 自动压缩：token > 75% context window 时触发
+            from agent.context_ops import estimate_tokens, compact_history
 
-        for i in range(self.max_rounds):
-            round_num = i + 1
-            self.emit("turn.round", {"round": round_num, "max": self.max_rounds})
-
-            response = self._do_llm_call(
-                round_num=round_num,
-                model=self.model,
-                messages=prefix + session.history,
-                tools=tool_schemas,
-            )
-
-            # 存储 assistant 消息
-            session.history.append(response.assistant_message)
-
-            if response.finish_reason == "stop":
-                reply = str(response.assistant_message.get("content") or "")
-                break
-
-            # 上下文溢出 → 压缩后重试
-            if response.finish_reason == "length":
-                # 撤销刚添加的截断消息
-                session.history.pop()
+            est = estimate_tokens(prefix + session.history)
+            if est > int(self.context_window * 0.75):
                 result = compact_history(
                     provider=self.provider, model=self.model,
                     history=session.history, recent_turns=self.compact_recent_turns,
@@ -719,12 +739,17 @@ class Kernel:
                         f"{session.summary}\n\n{result.summary}" if session.summary else result.summary
                     )
                 self.emit("context.compacted", {
-                    "trigger": "overflow",
+                    "trigger": "auto",
+                    "messages_before": result.compressed_count + result.retained_count,
+                    "messages_after": result.retained_count,
                     "messages_compressed": result.compressed_count,
                     "messages_retained": result.retained_count,
+                    "tokens_before": est,
+                    "tokens_after": estimate_tokens(prefix + session.history),
+                    "summary_chars": len(result.summary),
                     "summary": result.summary,
                 })
-                # 重建 prefix
+                # 重建 prefix（摘要可能已变）
                 system_content = self._system_prompt or ""
                 if session.summary:
                     system_content += (
@@ -736,44 +761,95 @@ class Kernel:
                     [{"role": "system", "content": system_content}]
                     if system_content else []
                 )
-                continue
 
-            # 工具调用
-            if response.tool_calls:
-                for tc in response.tool_calls:
-                    try:
-                        args = json.loads(tc.arguments)
-                    except json.JSONDecodeError:
-                        args = {}
-                    self.emit(
-                        "tool.call.start",
-                        {"name": tc.name, "args": args},
-                    )
-                    tool_def = self._tools.get(tc.name)
-                    if tool_def:
-                        try:
-                            result = tool_def.handler(args)
-                        except Exception as exc:
-                            result = {"error": f"{type(exc).__name__}: {exc}"}
-                        self.emit(f"tool:{tc.name}", {
-                            "args": args, "result": result,
-                        })
-                    else:
-                        result = {"error": f"未知工具: {tc.name}"}
-                    self.emit(
-                        "tool.call.done",
-                        {"name": tc.name, "result": result},
-                    )
+            reply = ""
 
-                    session.history.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": json.dumps(result, default=str),
+            for i in range(self.max_rounds):
+                round_num = i + 1
+                self.emit("turn.round", {"round": round_num, "max": self.max_rounds})
+
+                response = self._do_llm_call(
+                    round_num=round_num,
+                    model=self.model,
+                    messages=prefix + session.history,
+                    tools=tool_schemas,
+                )
+
+                # 存储 assistant 消息
+                session.history.append(response.assistant_message)
+
+                if response.finish_reason == "stop":
+                    reply = str(response.assistant_message.get("content") or "")
+                    break
+
+                # 上下文溢出 → 压缩后重试
+                if response.finish_reason == "length":
+                    # 撤销刚添加的截断消息
+                    session.history.pop()
+                    result = compact_history(
+                        provider=self.provider, model=self.model,
+                        history=session.history, recent_turns=self.compact_recent_turns,
+                    )
+                    session.history = result.retained
+                    if result.summary:
+                        session.summary = (
+                            f"{session.summary}\n\n{result.summary}" if session.summary else result.summary
+                        )
+                    self.emit("context.compacted", {
+                        "trigger": "overflow",
+                        "messages_compressed": result.compressed_count,
+                        "messages_retained": result.retained_count,
+                        "summary": result.summary,
                     })
-        else:
-            # max_rounds 耗尽
-            reply = f"[max_rounds={self.max_rounds} 耗尽]"
-            session.history.append({"role": "assistant", "content": reply})
+                    # 重建 prefix
+                    system_content = self._system_prompt or ""
+                    if session.summary:
+                        system_content += (
+                            "\n\n## 前段对话摘要\n"
+                            "以下是之前对话的压缩摘要，不是新消息。基于此背景继续对话：\n\n"
+                            f"{session.summary}"
+                        )
+                    prefix = (
+                        [{"role": "system", "content": system_content}]
+                        if system_content else []
+                    )
+                    continue
 
-        self.emit("turn.done", {"input": render_turn_input(turn_input), "reply": reply})
-        return reply
+                # 工具调用
+                if response.tool_calls:
+                    for tc in response.tool_calls:
+                        try:
+                            args = json.loads(tc.arguments)
+                        except json.JSONDecodeError:
+                            args = {}
+                        self.emit(
+                            "tool.call.start",
+                            {"name": tc.name, "args": args},
+                        )
+                        tool_def = self._tools.get(tc.name)
+                        if tool_def:
+                            result = self._call_tool(tc.name, tool_def, args)
+                            self.emit(f"tool:{tc.name}", {
+                                "args": args, "result": result,
+                            })
+                        else:
+                            result = {"error": f"未知工具: {tc.name}"}
+                        self.emit(
+                            "tool.call.done",
+                            {"name": tc.name, "result": result},
+                        )
+
+                        session.history.append({
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": json.dumps(result, default=str),
+                        })
+            else:
+                # max_rounds 耗尽
+                reply = f"[max_rounds={self.max_rounds} 耗尽]"
+                session.history.append({"role": "assistant", "content": reply})
+
+            self.emit("turn.done", {"input": render_turn_input(turn_input), "reply": reply})
+            return reply
+        finally:
+            self._execution_context = previous_ctx

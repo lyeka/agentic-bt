@@ -19,6 +19,8 @@ from pytest_bdd import given, parsers, scenario, then, when
 
 from agent.adapters.im.backend import InboundMessage, OutboundRef
 from agent.adapters.im.driver import IMDriver
+from agent.automation.models import DeliveryReceipt
+from agent.automation.store import AutomationStore
 from agent.kernel import Session
 from agent.messages import AttachmentRef, TurnInput
 from agent.runtime import AgentConfig, KernelBundle
@@ -387,3 +389,54 @@ def test_image_only_message_invokes_kernel(tmp_path):
     assert kernel.turn_calls == 1
     assert isinstance(kernel.last_input, TurnInput)
     assert kernel.last_input.attachments[0].kind == "image"
+
+
+def test_reply_to_automation_push_binds_run_refs(tmp_path):
+    imctx = given_backend(tmp_path)
+    driver = IMDriver(
+        backend=imctx["backend"],
+        adapter_name="telegram",
+        config=imctx["config"],
+        allowed_user_ids={"u1"},
+        confirm_timeout_sec=2,
+        status_edit_throttle_sec=0.0,
+        bundle_factory=imctx["bundle_factory"],
+    )
+    store = AutomationStore(
+        workspace=imctx["config"].workspace_dir,
+        state=imctx["config"].state_dir,
+    )
+    store.save_receipt(
+        DeliveryReceipt(
+            channel="telegram",
+            target="c1",
+            outbound_message_id="push-1",
+            task_id="task-1",
+            run_id="task-1-run-1",
+            kind="final_result",
+        )
+    )
+
+    msg = InboundMessage(
+        adapter="test",
+        conversation_id="c1",
+        user_id="u1",
+        is_private=True,
+        text="继续分析这个结果",
+        message_id="m-reply",
+        reply_to_message_id="push-1",
+        ts=datetime.now(),
+    )
+
+    async def _run() -> None:
+        await driver.handle(msg)
+        await asyncio.sleep(0)
+
+    asyncio.run(_run())
+
+    kernel = imctx["kernels"]["c1"]
+    assert isinstance(kernel.last_input, TurnInput)
+    assert {ref.kind: ref.value for ref in kernel.last_input.refs} == {
+        "automation_task": "task-1",
+        "automation_run": "task-1-run-1",
+    }

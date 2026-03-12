@@ -1,5 +1,5 @@
 """
-[INPUT]: os, pathlib, agent.kernel, agent.tools, agent.session_store, agent.providers, core.subagent（market adapters 仅 lazy import）
+[INPUT]: os, pathlib, agent.kernel, agent.tools, agent.session_store, agent.providers, agent.automation, core.subagent（market adapters 仅 lazy import）
 [OUTPUT]: AgentConfig, KernelBundle, build_kernel_bundle
 [POS]: 入口无关的 Kernel 组装层：统一 tools/permission/wire/trace/session_store/subagent 路径约定
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -15,6 +15,8 @@ from pathlib import Path
 from typing import Callable
 
 from agent.kernel import Kernel, MEMORY_MAX_CHARS, Permission
+from agent.automation.store import AutomationStore
+from agent.automation import tools as automation_tools
 from agent.providers import LLMProvider, OpenAIChatProvider
 from agent.session_store import JsonSessionStore, SessionStore
 from agent.tools import bash, compute, edit, market, read, web, write
@@ -40,6 +42,8 @@ class AgentConfig:
     tavily_api_key: str | None = None
     image_detail: str = "low"
     subagents: list[SubAgentDef] | None = None
+    automation_default_timezone: str = "Asia/Shanghai"
+    automation_task_scan_sec: int = 30
 
     @classmethod
     def from_env(cls) -> AgentConfig:
@@ -59,6 +63,8 @@ class AgentConfig:
         search_provider = os.getenv("SEARCH_PROVIDER", "tavily")
         tavily_api_key = os.getenv("TAVILY_API_KEY") or None
         image_detail = (os.getenv("IMAGE_DETAIL") or "low").strip().lower() or "low"
+        automation_default_timezone = os.getenv("AUTOMATION_DEFAULT_TIMEZONE", "Asia/Shanghai")
+        automation_task_scan_sec = int(os.getenv("AUTOMATION_TASK_SCAN_SEC", "30"))
         return cls(
             model=model,
             base_url=base_url,
@@ -76,6 +82,8 @@ class AgentConfig:
             search_provider=search_provider,
             tavily_api_key=tavily_api_key,
             image_detail=image_detail,
+            automation_default_timezone=automation_default_timezone,
+            automation_task_scan_sec=automation_task_scan_sec,
         )
 
 
@@ -166,6 +174,21 @@ def _make_adapter(name: str, config: AgentConfig) -> object:
     raise ValueError(f"Unknown market adapter: {name}")
 
 
+def _build_market_adapter(config: AgentConfig) -> object:
+    """构造运行时使用的市场适配器（必要时自动做 A 股/非 A 股路由）。"""
+    cn = _make_adapter(config.market_cn, config)
+    us = _make_adapter(config.market_us, config)
+    if config.market_cn == config.market_us:
+        return cn
+
+    from agent.adapters.market.composite import CompositeMarketAdapter, is_ashare
+
+    composite = CompositeMarketAdapter()
+    composite.route(is_ashare, cn)
+    composite.fallback(us)
+    return composite
+
+
 def build_kernel_bundle(
     *,
     config: AgentConfig,
@@ -196,16 +219,7 @@ def build_kernel_bundle(
     )
 
     # ── market 工具（显式声明数据源）──
-    cn = _make_adapter(config.market_cn, config)
-    us = _make_adapter(config.market_us, config)
-    if config.market_cn == config.market_us:
-        market.register(kernel, cn)
-    else:
-        from agent.adapters.market.composite import CompositeMarketAdapter, is_ashare
-        composite = CompositeMarketAdapter()
-        composite.route(is_ashare, cn)
-        composite.fallback(us)
-        market.register(kernel, composite)
+    market.register(kernel, _build_market_adapter(config))
     compute.register(kernel)
     read.register(kernel, workspace, cwd=cwd)
     write.register(kernel, workspace, cwd=cwd)
@@ -220,10 +234,20 @@ def build_kernel_bundle(
         search_adapter = TavilyAdapter(api_key=config.tavily_api_key)
     web.register(kernel, search_adapter=search_adapter)
 
+    automation_store = AutomationStore(workspace=workspace, state=state)
+    automation_tools.register(
+        kernel,
+        store=automation_store,
+        adapter_name=adapter_name,
+        conversation_id=conversation_id,
+        default_timezone=config.automation_default_timezone,
+    )
+
     # permissions
     kernel.permission("soul.md", Permission.USER_CONFIRM)
     kernel.permission("memory.md", Permission.FREE)
     kernel.permission("notebook/**", Permission.FREE)
+    kernel.permission("automation/tasks/**", Permission.USER_CONFIRM)
     kernel.permission("__external__", Permission.USER_CONFIRM)
 
     # boot (skills + subagents + system prompt)

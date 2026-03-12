@@ -12,10 +12,13 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from agent.adapters.telegram import (
+    TelegramBackend,
     _collect_attachments,
+    _handle_confirm_callback,
     _markdown_to_html,
     _message_text,
     _normalize_render_mode,
+    _parse_confirm_callback,
     _parse_allowed_user_ids,
     _parse_bool,
 )
@@ -117,3 +120,77 @@ def test_collect_audio_attachment_returns_explicit_error(tmp_path: Path):
     attachments, error = asyncio.run(_run())
     assert attachments == ()
     assert "音频" in error
+
+
+def test_parse_confirm_callback():
+    assert _parse_confirm_callback("confirm:123:456:y") == ("123:456", True)
+    assert _parse_confirm_callback("confirm:123:n") == ("123", False)
+    assert _parse_confirm_callback("other") is None
+
+
+def test_telegram_backend_ask_confirm_unblocks_on_waiter_result():
+    class FakeBot:
+        async def send_message(self, chat_id: int, text: str, reply_markup=None):
+            assert chat_id == 1001
+            assert "确认操作" in text
+            assert reply_markup is not None
+            return SimpleNamespace(message_id=9)
+
+    async def _run():
+        waiters: dict[str, asyncio.Future] = {}
+        backend = TelegramBackend(bot=FakeBot(), _confirm_waiters=waiters)
+        task = asyncio.create_task(backend.ask_confirm("1001", "确认操作 soul.md?", timeout_sec=3))
+        await asyncio.sleep(0)
+        assert len(waiters) == 1
+        fut = next(iter(waiters.values()))
+        fut.set_result(True)
+        return await task
+
+    assert asyncio.run(_run()) is True
+
+
+def test_handle_confirm_callback_resolves_waiter_and_updates_message():
+    class FakeQuery:
+        def __init__(self) -> None:
+            self.data = "confirm:chat1:42:y"
+            self.message = SimpleNamespace(text="确认操作 soul.md?")
+            self.answers: list[str] = []
+            self.edits: list[str] = []
+
+        async def answer(self, text: str | None = None):
+            self.answers.append(text or "")
+
+        async def edit_message_text(self, text: str):
+            self.edits.append(text)
+
+    async def _run():
+        query = FakeQuery()
+        fut = asyncio.get_running_loop().create_future()
+        waiters = {"chat1:42": fut}
+        handled = await _handle_confirm_callback(query, waiters)
+        return handled, fut.result(), query
+
+    handled, approved, query = asyncio.run(_run())
+    assert handled is True
+    assert approved is True
+    assert query.answers[-1] == "已批准"
+    assert "已批准" in query.edits[-1]
+
+
+def test_handle_confirm_callback_for_expired_waiter_reports_expired():
+    class FakeQuery:
+        def __init__(self) -> None:
+            self.data = "confirm:missing:n"
+            self.answers: list[str] = []
+
+        async def answer(self, text: str | None = None):
+            self.answers.append(text or "")
+
+    async def _run():
+        query = FakeQuery()
+        handled = await _handle_confirm_callback(query, {})
+        return handled, query.answers
+
+    handled, answers = asyncio.run(_run())
+    assert handled is True
+    assert answers[-1] == "该确认已失效"

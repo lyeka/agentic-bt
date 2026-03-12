@@ -482,15 +482,49 @@ Memory 是**单文件 `memory.md`**，agent 自组织内容：
 
 **倒排写入的意义**：read 工具从头截断（50KB 以内），agent 默认看到最近的记忆，旧记忆自然被"遗忘"，需要翻页或 grep 才能找到。模拟人脑的近因效应。
 
-### 4.5 Scheduler — 任务调度
+### 4.5 Scheduler — 自动化任务
+
+当前实现采用 `Trigger -> Reaction -> Delivery` 三段式，而不是工作流编排引擎。
 
 核心交互（先设计后确认）：
-1. 用户用自然语言描述意图
-2. Agent 生成"任务设计稿"（触发条件、频率、输入、产物、通知、失败策略）
-3. 用户确认后才落地为 Task
 
-任务类型：定时（cron/interval）、事件（消息关键词/文件变更/webhook）。
-输出策略：默认写入 notebook + 发送摘要；支持静默任务。
+1. 用户用自然语言描述需求
+2. Agent 调 `task_plan` 生成结构化草案和预览
+3. 用户确认后，Agent 调 `task_apply`
+4. worker 扫描 `workspace/automation/tasks/*.yaml` 并开始调度
+
+v1 Trigger：
+
+- `cron`
+- `price_threshold`
+
+v1 Reaction executor：
+
+- `main_agent`
+- `skill`
+- `subagent`
+
+v1 Delivery phase：
+
+- `pre_alert`
+- `final_result`
+- `on_failure`
+
+关键语义：
+
+- 高频检测面不用 LLM；只有真正触发后才启动一次 agent/skill/subagent
+- 自动任务使用独立 `task session`
+- 用户对自动推送的追问仍发生在原 IM 主会话里，不切换 session
+- reply-to-message 只绑定轻量 `run_id/task_id` selector；需要更多上下文时由 agent 调 `task_context`
+
+任务定义与状态分离：
+
+- 定义：`workspace/automation/tasks/*.yaml`
+- 运行态：`state/automation/tasks/*.json`
+- 运行记录：`state/automation/runs/**`
+- 主动推送回执：`state/automation/receipts/**`
+
+详细设计见 [automation.md](./automation.md)。
 
 ### 4.6 Skills — 技能系统
 
@@ -706,7 +740,7 @@ Agent 输出任务设计稿：
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| Scheduler | ❌ | APScheduler 定时任务 |
+| Scheduler | ✅ | automation worker + cron/price_threshold + task tools + IM reply binding |
 | Skill Engine | ❌ | 技能发现/加载/执行 |
 | Subagent Runner | ❌ | fork 上下文 + 汇总 |
 | Tool Provider Registry | ❌ | 外部工具注册 |
