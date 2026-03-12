@@ -8,8 +8,8 @@ AgenticBT 完整设计文档集，指导全部开发工作。
 agent-design.md: **Agent 唯一活文档** — 仿生学设计理念/Kernel-centric 架构/Pi 工具哲学（6 工具）/OHLCV 内核原语/预连通管道/成长循环/Soul 灵魂系统/Memory 内化认知/Notebook 外化产物/Workspace 设计/Default Profile/Skills/功能需求清单（含实现状态追踪）
 architecture.md: 架构总览，设计哲学，模块关系图，与现有框架对比
 engine.md: 确定性引擎，数据回放/指标计算/订单撮合/仓位核算/风控拦截
-tools.md: 五个核心工具组设计，market/indicator/account/trade/memory 接口定义
-compute.md: 沙箱化 Python 计算工具设计，eval-first 策略/Trading Coreutils/安全边界/可行性审查
+tools.md: 当前 Agent 工具协议说明，重点覆盖 market_ohlcv 的 interval/mode/start/end 语义、DataStore key 与 compute 配合方式
+compute.md: compute 工具现行协议与正确用法，包含 selector 选帧规则、常见误区和安全边界
 memory.md: 文件式记忆系统，工作空间隔离，log/note/recall 工具，受 OpenClaw 启发
 context.md: 上下文工程，六层分层注入，市场数据格式，token 预算管理
 eval.md: 三维评估体系，绩效/遵循度/一致性，A/B 测试矩阵

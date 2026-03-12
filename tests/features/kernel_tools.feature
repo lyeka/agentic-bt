@@ -3,23 +3,45 @@ Feature: Kernel 工具与工作区 — Phase 1b/1c 完整验证
 
   # ── Phase 1b: 能看能算 ──
 
-  Scenario: market_ohlcv 返回 OHLCV 数据
+  Scenario: market_ohlcv 返回带元数据的 OHLCV 数据
     Given 一个带市场工具的 Kernel
-    When 调用 market_ohlcv symbol "TEST"
+    When 调用 market_ohlcv symbol "TEST" interval "1d" mode "history"
     Then 结果包含 data 列表和 total_rows
+    And 结果包含 market 元数据
     And data 每条记录含 date/open/high/low/close/volume
+    And DataStore 中存在 "ohlcv:TEST:1d:history"
     And DataStore 中存在 "ohlcv:TEST"
 
-  Scenario: market_ohlcv 透传 start/end 参数
+  Scenario: market_ohlcv 透传 interval/mode/start/end 参数
     Given 一个带市场工具的 Kernel（记录 fetch 参数）
-    When 调用 market_ohlcv symbol "TEST" start "2024-01-01" end "2024-01-05"
-    Then adapter 收到 start "2024-01-01" 和 end "2024-01-05"
+    When 调用 market_ohlcv symbol "TEST" interval "1m" mode "history" start "2024-01-02 09:30:00" end "2024-01-02 10:30:00"
+    Then adapter 收到 interval "1m" mode "history" start "2024-01-02 09:30:00" end "2024-01-02 10:30:00"
 
-  Scenario: compute 使用行情数据计算
+  Scenario: compute 默认使用最近一次行情数据计算
     Given 一个带市场工具的 Kernel
-    And 已获取 "TEST" 行情
+    And 已获取 "TEST" interval "1d" mode "history" 行情
     When 调用 compute code "len(df)"
     Then 结果 result 为正整数
+
+  Scenario: compute 可按 selector 选择不同数据集
+    Given 一个带多周期市场工具的 Kernel
+    And 已获取 "TEST" interval "1d" mode "history" 行情
+    And 已获取 "TEST" interval "1m" mode "latest" 行情
+    When 先后调用 compute code "len(df)" 选择 "TEST" 的 "1d/history" 与 "1m/latest"
+    Then 第一次结果 result 等于 5
+    And 第二次结果 result 等于 1
+
+  Scenario: compute 显式提供 symbol 时不会跨 symbol 回退
+    Given 一个带跨 symbol 数据的 Kernel
+    And 已获取 "OTHER" interval "1m" mode "latest" 行情
+    When 调用 compute code "len(df)" symbol "TEST" interval "1m" mode "latest"
+    Then 结果包含 error
+    And 结果中的 error 包含 "未找到对应 OHLCV"
+
+  Scenario: market_ohlcv latest 不接受 start/end
+    Given 一个带市场工具的 Kernel
+    When 调用 market_ohlcv symbol "TEST" interval "1m" mode "latest" start "2024-01-02 09:30:00" end "2024-01-02 10:30:00" 期待异常
+    Then 捕获到错误包含 "mode=latest 不接受 start/end"
 
   # ── Phase 1c: 能读能写能记 ──
 

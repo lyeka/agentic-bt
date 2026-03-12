@@ -1,5 +1,5 @@
 """
-[INPUT]: re, pandas, typing (Callable, Protocol inference)
+[INPUT]: re, typing (Callable), agent.adapters.market.schema
 [OUTPUT]: CompositeMarketAdapter — 多数据源聚合路由器, is_ashare — A 股 symbol 识别
 [POS]: adapter 层组合模式，对外满足 MarketAdapter Protocol，market tool 零感知
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Callable
 
-import pandas as pd
+from agent.adapters.market.schema import MarketFetchResult, MarketQuery
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -36,19 +36,13 @@ class CompositeMarketAdapter:
         self._fallback = adapter
         return self
 
-    def fetch(
-        self,
-        symbol: str,
-        period: str = "daily",
-        start: str | None = None,
-        end: str | None = None,
-    ) -> pd.DataFrame:
+    def fetch(self, query: MarketQuery) -> MarketFetchResult:
         for matcher, adapter in self._routes:
-            if matcher(symbol):
-                return adapter.fetch(symbol, period, start, end)
+            if matcher(query.normalized_symbol):
+                return adapter.fetch(query)
         if self._fallback:
-            return self._fallback.fetch(symbol, period, start, end)
-        raise ValueError(f"No adapter for symbol: {symbol}")
+            return self._fallback.fetch(query)
+        raise ValueError(f"No adapter for symbol: {query.normalized_symbol}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

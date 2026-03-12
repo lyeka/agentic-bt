@@ -1,247 +1,160 @@
-# Core Tools — 核心工具设计
+# Agent Tools — 当前工具协议
 
-> Agent 通过工具与 Framework 交互。
-> 5 个核心工具组，每个职责单一，接口简洁。
+> 本文档描述 `src/agent/tools/` 中真实存在、会直接暴露给 LLM 的工具语义。
+> 重点是让读者和 Agent 都能正确理解 `market_ohlcv` 与 `compute` 的配合方式。
 
 ## 工具总览
 
-```
-Core Tools (框架内置，不可替换):
+当前 Kernel 内置 7 个工具：
 
-  market       感知行情
-  indicator    计算指标
-  account      感知持仓
-  trade        执行操作
-  memory       记录和回忆
+| 工具 | 作用 |
+|------|------|
+| `market_ohlcv` | 获取 OHLCV，写入 DataStore，供 `compute` 消费 |
+| `compute` | 在沙箱中对已加载 OHLCV 做 Python 分析 |
+| `read` | 读工作区文件 |
+| `write` | 写工作区文件 |
+| `edit` | 精确文本替换 |
+| `bash` | 执行 shell 命令（按权限控制） |
+| `web_search` / `web_fetch` | 可选 Web 搜索与抓取 |
 
-Extension Tools (MCP/Skills，可选):
-  新闻情感 · 宏观数据 · 另类数据 · 自定义分析 · ...
-```
+其中最容易用错的是 `market_ohlcv` 和 `compute`。
 
-## market — 感知行情
+## market_ohlcv
 
-Agent 通过此工具观察市场状态。
+### 请求协议
 
-### observe
-
-获取当前 bar 的行情快照。
-
-```
-输入: 无 (或指定 symbol)
-输出:
+```json
 {
-  "datetime": "2024-03-15",
-  "bars": {
-    "AAPL": {
-      "open": 172.5,
-      "high": 174.2,
-      "low": 171.8,
-      "close": 173.9,
-      "volume": 45200000
+  "symbol": "600519.SH",
+  "interval": "1m",
+  "mode": "history",
+  "start": "2026-03-12 09:30:00",
+  "end": "2026-03-12 10:30:00"
+}
+```
+
+字段语义：
+
+- `symbol`: 标的代码。A 股内部统一归一化为 `.SH/.SZ/.BJ`，`yfinance` 出站时会把 `.SH` 转成 `.SS`
+- `interval`: bar 粒度，只能是 `1d | 1m | 5m | 15m | 30m | 60m`
+- `mode`:
+  - `history`: 返回一段 OHLCV
+  - `latest`: 返回最新可用的一根分钟 bar
+- `start/end`: 仅 `history` 支持
+
+### 默认行为
+
+- `interval="1d", mode="history"` 且不传 `start/end`：最近 1 年日线
+- 分钟 `history` 且不传 `start/end`：当日盘中；休市时返回最近一个交易日
+- `latest` 必须显式指定分钟 `interval`
+
+### 关键规则
+
+- `mode="latest"` 不是“交易所实时流”，而是“数据源当前最新可用的一根 bar”
+- `mode="latest"` 禁止传 `start/end`
+- `interval="1d"` 禁止配 `mode="latest"`
+- 日线 `start/end` 用 `YYYY-MM-DD`
+- 分钟 `start/end` 用 `YYYY-MM-DD HH:MM:SS`
+
+### 返回结构
+
+```json
+{
+  "symbol": "600519.SH",
+  "normalized_symbol": "600519.SH",
+  "source": "yfinance",
+  "interval": "1m",
+  "mode": "latest",
+  "timezone": "Asia/Shanghai",
+  "as_of": "2026-03-12 10:13:00",
+  "effective_start": "2026-03-12 10:13:00",
+  "effective_end": "2026-03-12 10:13:00",
+  "warning": "Yahoo Finance intraday data may be delayed for this market.",
+  "total_rows": 1,
+  "data": [
+    {
+      "date": "2026-03-12 10:13:00",
+      "open": 65.12,
+      "high": 65.18,
+      "low": 65.08,
+      "close": 65.10,
+      "volume": 6041339
     }
-  }
+  ]
 }
 ```
 
-### history
+### DataStore 语义
 
-获取指定资产的历史 K 线。
+每次调用 `market_ohlcv` 都会把 DataFrame 写入多个 key：
 
-```
-输入: symbol: str, bars: int
-输出: 最近 N 根 bar 的 OHLCV 数据列表
-```
+- 精确窗口 key：`ohlcv:{symbol}:{interval}:{mode}:{start_token}:{end_token}`
+- 选择器 key：`ohlcv:{symbol}:{interval}:{mode}`
+- symbol 别名：`ohlcv:{symbol}`
+- 全局别名：`_default_ohlcv`
 
-## indicator — 计算指标
+这让同一 symbol 的日线、分钟线、latest 可以并存，不会互相覆盖。
 
-Agent 通过此工具获取技术指标值。指标计算是框架核心能力。
+## compute
 
-### calc
+### 核心语义
 
-计算指定技术指标。
+`compute` 不会自己拉行情。它只消费已经由 `market_ohlcv` 注入 DataStore 的 DataFrame。
 
-```
-输入: name: str, symbol: str, **params
-输出: 指标当前值及相关数据
+可用变量：
 
-示例:
-  indicator.calc("RSI", symbol="AAPL", period=14)
-  → {"value": 28.5, "prev": 31.2}
+- `df`
+- `open/high/low/close/volume/date`
+- `account/cash/equity/positions`
+- `pd/np/ta/math`
+- `latest/prev/crossover/crossunder/above/below/bbands/macd/tail/nz`
 
-  indicator.calc("MACD", symbol="AAPL", fast=12, slow=26, signal=9)
-  → {"macd": 0.35, "signal": 0.12, "histogram": 0.23}
+### 选择器协议
 
-  indicator.calc("BollingerBands", symbol="AAPL", period=20, std=2)
-  → {"upper": 178.2, "middle": 174.5, "lower": 170.8}
-```
+`compute` 支持和 `market_ohlcv` 相同的 selector：
 
-### list
-
-列出所有可用的技术指标。
-
-```
-输入: 无
-输出: 指标名称列表及分类
-```
-
-### describe
-
-获取指定指标的参数说明。
-
-```
-输入: name: str
-输出:
+```json
 {
-  "name": "RSI",
-  "description": "Relative Strength Index, 0-100 range",
-  "params": {
-    "period": {"type": "int", "default": 14, "range": [2, 200]}
-  }
+  "code": "latest(close)",
+  "symbol": "600519.SH",
+  "interval": "1m",
+  "mode": "latest"
 }
 ```
 
-## account — 感知持仓
+查找优先级：
 
-Agent 通过此工具了解自身的资金和持仓状态。
+1. 如果传了 `symbol + interval + mode + start/end`：`symbol` 精确窗口 key → `symbol + interval + mode` → `symbol`
+2. 如果传了 `symbol + interval + mode`：`symbol + interval + mode` → `symbol`
+3. 如果只传了 `symbol`：`symbol`
+4. 如果没有 `symbol`，只传了 `interval/mode`：`_default_ohlcv:{interval}:{mode}` → `_default_ohlcv`
+5. 如果什么都没传：`_default_ohlcv`
 
-### status
+### 重要约束
 
-获取当前账户完整状态。
+- `market_ohlcv` 返回 JSON 里的 `data` 不会自动注入 `compute`
+- 如果你加载了多个数据集，后续 `compute` 必须复用同一组 selector
+- 一旦显式提供 `symbol`，`compute` 不会跨 symbol 回退
+- 分钟数据的 `date` 带时分秒
+- 要最新值请用 `latest(close)` 或 `close.iloc[-1]`，不要写 `close[-1]`
 
-```
-输入: 无
-输出:
-{
-  "cash": 85000,
-  "equity": 102300,
-  "positions": {
-    "AAPL": {
-      "size": 100,
-      "avg_price": 170.5,
-      "current_price": 173.9,
-      "unrealized_pnl": 340,
-      "weight_pct": 17.0
-    },
-    "GOOGL": {
-      "size": 50,
-      "avg_price": 142.0,
-      "current_price": 141.4,
-      "unrealized_pnl": -120,
-      "weight_pct": 6.9
-    }
-  },
-  "pending_orders": [...],
-  "today_pnl": 220,
-  "total_pnl": 2300,
-  "max_drawdown": 0.08
-}
+### 正确用法
+
+```text
+1. market_ohlcv(symbol="600519.SH", interval="1d", mode="history")
+2. compute(code="latest(ta.rsi(close, 14))", symbol="600519.SH", interval="1d", mode="history")
 ```
 
-## trade — 执行操作
-
-Agent 通过此工具提交交易指令。所有指令先经 Risk Guard 检查。
-
-### execute
-
-提交一个交易动作。
-
-```
-输入:
-  action: "buy" | "sell" | "close"
-  symbol: str
-  quantity: int       (close 时可省略)
-  order_type: "market" | "limit" | "stop"  (默认 "market")
-  price: float        (limit/stop 时必填)
-
-示例:
-  trade.execute(action="buy", symbol="AAPL", quantity=100)
-  trade.execute(action="buy", symbol="AAPL", quantity=100,
-                order_type="limit", price=171.0)
-  trade.execute(action="sell", symbol="AAPL", quantity=50)
-  trade.execute(action="close", symbol="AAPL")
-
-输出:
-  成功: {"status": "submitted", "order_id": "..."}
-  被风控拒绝: {"status": "rejected", "reason": "仓位超限: 23% > 20%"}
+```text
+1. market_ohlcv(symbol="600519.SH", interval="1m", mode="latest")
+2. compute(code="{'last_close': latest(close), 'last_time': str(latest(date))}",
+           symbol="600519.SH", interval="1m", mode="latest")
 ```
 
-## memory — 记录和回忆
+### 常见误区
 
-Agent 通过此工具管理交易记忆。本质是文件读写，但 Agent 不接触文件路径。
-
-详细设计见 [memory.md](memory.md)。
-
-### log
-
-往当日日志追加一条记录。
-
-```
-输入: content: str
-效果: 追加到 journal/{current_date}.md
-
-示例:
-  memory.log("观察到 AAPL 连续 3 天缩量下跌, RSI 逼近 30")
-  memory.log("买入 AAPL 100 股, 理由: RSI 超卖 + 放量企稳")
-```
-
-### note
-
-创建或更新一个主题笔记。
-
-```
-输入: key: str, content: str
-效果: 写入/覆盖 notes/{key}.md
-
-示例:
-  memory.note("position_AAPL", "持仓 100 股 @172.5, 止损 168.0")
-  memory.note("market_regime", "当前震荡市, ADX=18, 布林带收窄")
-```
-
-### recall
-
-搜索相关记忆。
-
-```
-输入: query: str
-输出: 相关记忆片段列表
-
-示例:
-  memory.recall("上次 RSI 超卖时买 AAPL 的结果")
-  → [
-      { "source": "journal/2024-02-20.md",
-        "content": "买入 AAPL 因 RSI=25, 最终止损出局 -1.8%" },
-      { "source": "notes/position_AAPL.md",
-        "content": "已平仓... RSI 超卖 + 放量组合有效" },
-    ]
-```
-
-## 扩展工具 (Extension Tools)
-
-框架不内置，通过 MCP Server 或 Skills 机制接入。
-
-```
-MCP Server 示例:
-
-  news-sentiment
-    ├── get_news(symbol, date)
-    └── get_sentiment(symbol, date)
-
-  macro-data
-    ├── get_fed_rate()
-    └── get_vix()
-
-  alternative-data
-    └── get_social_sentiment(symbol)
-```
-
-Agent 自主决定调用哪些扩展工具。框架不限制也不干预。
-
-## 工具设计原则
-
-1. **职责单一** — 每个工具组只做一件事
-2. **接口简洁** — 参数少，语义明确，LLM 容易正确调用
-3. **输出结构化** — JSON 格式，LLM 容易解析和推理
-4. **错误信息丰富** — 失败时返回清晰原因，Agent 可据此调整
-5. **不越界** — 核心工具不替代 Agent 做决策
+- 把 `latest` 理解成“绝对实时”
+- 先拉了 `1d/history`，再拉 `1m/latest`，随后 `compute` 只传 `symbol`，结果拿错数据帧
+- 试图在 `compute` 里直接使用 `market_ohlcv` 的 JSON 结果
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
