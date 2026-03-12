@@ -1,5 +1,5 @@
 """
-[INPUT]: pytest-bdd, agent.kernel, unittest.mock
+[INPUT]: pytest-bdd, agent.kernel, agent.providers (message_to_dict), unittest.mock
 [OUTPUT]: kernel.feature step definitions（Mock LLM）
 [POS]: tests/ BDD 测试层，验证 Kernel ReAct loop / wire·emit / Session / boot / soul 刷新
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -14,7 +14,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from pytest_bdd import given, parsers, scenario, then, when
 
-from agent.kernel import Kernel, Session, WORKSPACE_GUIDE, _msg_to_dict
+from agent.kernel import Kernel, Session, WORKSPACE_GUIDE
+from agent.providers import message_to_dict
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -114,7 +115,7 @@ def test_msg_to_dict_preserves_reasoning_content():
         model_extra=None,
     )
 
-    result = _msg_to_dict(msg)
+    result = message_to_dict(msg)
 
     assert result["reasoning_content"] == "internal reasoning"
 
@@ -124,8 +125,8 @@ def test_kernel_emits_llm_call_error_on_provider_exception():
     session = Session()
     seen: list[dict] = []
     kernel.wire("llm.call.error", lambda _e, data: seen.append(data))
-    kernel.client = MagicMock()
-    kernel.client.chat.completions.create.side_effect = RuntimeError("provider 400")
+    kernel.provider = MagicMock()
+    kernel.provider.complete.side_effect = RuntimeError("provider 400")
 
     with pytest.raises(RuntimeError, match="provider 400"):
         kernel.turn("hello", session)
