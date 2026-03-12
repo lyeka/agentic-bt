@@ -21,8 +21,8 @@
 `read.py`: read 工具 — 文件读取（行号+分页+截断+二进制检测+目录列表）
 `write.py`: write 工具 — 文件写入（自动创建目录+权限检查+字节数反馈）
 `edit.py`: edit 工具 — 精确文本替换（模糊匹配+唯一性检查+diff 输出）
-`market.py`: MarketAdapter Protocol + market_ohlcv 工具注册（返回原始 OHLCV records + start/end 时间范围透传），adapter pattern 解耦数据源
-`compute.py`: 沙箱 Python 计算，自动从 DataStore 注入 OHLCV
+`market.py`: MarketAdapter Protocol + market_ohlcv 工具注册（interval/mode/start/end 新协议 + source/as_of/warning 元数据 + DataStore 多版本 key），adapter pattern 解耦数据源
+`compute.py`: 沙箱 Python 计算，自动从 DataStore 注入 OHLCV；支持 symbol/interval/mode/start/end selector 精确选帧
 `bash.py`: shell 命令执行；subprocess + 超时 + 进程树清理（os.killpg）+ tail 截断；USER_CONFIRM 权限
 `web.py`: SearchAdapter Protocol + web_search/web_fetch 工具注册；Jina Reader 优先 + stdlib fallback；fetch 始终注册，search 按 adapter 条件注册
 
@@ -49,11 +49,12 @@
 
 ### adapters/market/
 `__init__.py`: 市场数据适配器入口
-`csv.py`: CsvAdapter — 基于 DataFrame dict 的测试用 MarketAdapter
-`tushare.py`: TushareAdapter — A 股日线 OHLCV，tushare Pro API
-`yfinance.py`: YFinanceAdapter — 美股日线 OHLCV，Yahoo Finance（零 API Key）
-`finnhub.py`: FinnhubAdapter — 美股日线 OHLCV，Finnhub REST API（后备源，需免费 Key）
-`composite.py`: CompositeMarketAdapter — 多数据源聚合路由器（matcher + fallback），对外满足 MarketAdapter Protocol；is_ashare 便利函数
+`csv.py`: CsvAdapter — 基于 DataFrame / 多 selector dict 的测试用 MarketAdapter；支持 history/latest 基础过滤
+`schema.py`: MarketQuery/MarketFetchResult 协议层（interval/mode 校验 + symbol 归一化 + 时间解析 + DataStore key helper + JSON 时间格式）
+`tushare.py`: TushareAdapter — A 股 1d/history + 分钟 history + latest bar；分钟/最新权限异常转可读错误
+`yfinance.py`: YFinanceAdapter — Yahoo Finance 1d/history + 分钟 history/latest；A 股 `.SH -> .SS` 归一化 + intraday 延迟 warning
+`finnhub.py`: FinnhubAdapter — 美股 1d/history OHLCV；显式拒绝分钟/latest
+`composite.py`: CompositeMarketAdapter — 多数据源聚合路由器（matcher + fallback），对外满足 MarketAdapter Protocol；按 normalized symbol 路由；is_ashare 便利函数
 
 ### adapters/web/
 `__init__.py`: web 搜索适配器包入口

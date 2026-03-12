@@ -5,25 +5,29 @@ Feature: FinnhubAdapter — 美股日线 OHLCV 数据适配器（后备源）
   Background:
     Given 一个 mock finnhub 环境
 
-  Scenario: 列名标准化
+  Scenario: 日线 history 返回标准列
     Given finnhub 返回原始 candle 数据
-    When 调用 finnhub fetch "AAPL"
+    When 调用 finnhub fetch history "AAPL"
     Then finnhub 返回 DataFrame 包含标准列 "date,open,high,low,close,volume"
 
   Scenario: date 列为 datetime 类型
     Given finnhub 返回原始 candle 数据
-    When 调用 finnhub fetch "AAPL"
+    When 调用 finnhub fetch history "AAPL"
     Then finnhub date 列类型为 datetime
 
   Scenario: 数据按日期升序排列
     Given finnhub 返回倒序 candle 数据
-    When 调用 finnhub fetch "AAPL"
+    When 调用 finnhub fetch history "AAPL"
     Then finnhub 数据按 date 升序排列
 
   Scenario: 指定日期范围透传
-    When 调用 finnhub fetch "AAPL" 从 "2024-01-01" 到 "2024-06-01"
+    When 调用 finnhub fetch history "AAPL" 从 "2024-01-01" 到 "2024-06-01"
     Then finnhub client 收到正确的 UNIX 时间戳范围
 
   Scenario: 默认拉取最近一年
-    When 调用 finnhub fetch "AAPL" 不指定日期
+    When 调用 finnhub fetch history "AAPL" 不指定日期
     Then finnhub client 收到的 from_ 距今约 365 天
+
+  Scenario: 分钟与 latest 模式显式拒绝
+    When 调用 finnhub fetch latest "AAPL" interval "1m"
+    Then 返回错误包含 "finnhub 仅支持 1d history"

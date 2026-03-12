@@ -1,5 +1,5 @@
 """
-[INPUT]: pytest-bdd, agent.adapters.market.composite
+[INPUT]: pytest-bdd, agent.adapters.market.composite, agent.adapters.market.schema
 [OUTPUT]: market_routing.feature step definitions
 [POS]: tests/ BDD 测试层，验证 CompositeMarketAdapter 路由逻辑
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
@@ -12,6 +12,7 @@ import pytest
 from pytest_bdd import given, parsers, scenario, then, when
 
 from agent.adapters.market.composite import CompositeMarketAdapter, is_ashare
+from agent.adapters.market.schema import build_market_query, make_fetch_result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -41,15 +42,14 @@ def test_no_match_no_fallback(): pass
 def test_fallback_only(): pass
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 测试数据
-# ─────────────────────────────────────────────────────────────────────────────
-
 def _sample_df() -> pd.DataFrame:
     return pd.DataFrame({
         "date": pd.to_datetime(["2024-01-03"]),
-        "open": [10.0], "high": [11.0], "low": [9.0],
-        "close": [10.5], "volume": [1000],
+        "open": [10.0],
+        "high": [11.0],
+        "low": [9.0],
+        "close": [10.5],
+        "volume": [1000],
     })
 
 
@@ -60,23 +60,20 @@ class FakeAdapter:
         self.name = name
         self.called_with: str | None = None
 
-    def fetch(self, symbol, period="daily", start=None, end=None):
-        self.called_with = symbol
-        return _sample_df()
+    def fetch(self, query):
+        self.called_with = query.normalized_symbol
+        return make_fetch_result(
+            df=_sample_df(),
+            query=query,
+            source=self.name,
+            timezone=query.timezone,
+        )
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Fixture
-# ─────────────────────────────────────────────────────────────────────────────
 
 @pytest.fixture
 def mrctx():
     return {"composite": CompositeMarketAdapter(), "adapters": {}}
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Given
-# ─────────────────────────────────────────────────────────────────────────────
 
 @given(parsers.parse('注册 "{name}" adapter 匹配 A 股 symbol'))
 def given_ashare_route(mrctx, name):
@@ -99,27 +96,21 @@ def given_catch_all(mrctx, name):
     mrctx["composite"].route(lambda s: True, adapter)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# When
-# ─────────────────────────────────────────────────────────────────────────────
-
-@when(parsers.parse('composite fetch "{symbol}"'))
-def when_fetch(mrctx, symbol):
-    mrctx["result"] = mrctx["composite"].fetch(symbol)
+@when(parsers.parse('composite fetch history "{symbol}" interval "{interval}"'))
+def when_fetch(mrctx, symbol, interval):
+    mrctx["result"] = mrctx["composite"].fetch(
+        build_market_query(symbol=symbol, interval=interval, mode="history")
+    )
 
 
-@when(parsers.parse('composite fetch "{symbol}" 无 fallback'))
-def when_fetch_no_fallback(mrctx, symbol):
+@when(parsers.parse('composite fetch history "{symbol}" interval "{interval}" 无 fallback'))
+def when_fetch_no_fallback(mrctx, symbol, interval):
     try:
-        mrctx["composite"].fetch(symbol)
+        mrctx["composite"].fetch(build_market_query(symbol=symbol, interval=interval, mode="history"))
         mrctx["error"] = None
-    except ValueError as e:
-        mrctx["error"] = e
+    except ValueError as exc:
+        mrctx["error"] = exc
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Then
-# ─────────────────────────────────────────────────────────────────────────────
 
 @then(parsers.parse('实际调用的 adapter 是 "{name}"'))
 def then_called_adapter(mrctx, name):

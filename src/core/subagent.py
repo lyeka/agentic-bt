@@ -96,11 +96,12 @@ def run_subagent(
     *,
     definition: SubAgentDef,
     task: str,
-    context: str = "",
-    provider: Any,
     model: str,
     tool_schemas: list[dict],
     tool_executor: Callable[[str, dict], Any],
+    context: str = "",
+    provider: Any | None = None,
+    client: Any | None = None,
     emit_fn: Callable[[str, Any], None] | None = None,
 ) -> SubAgentResult:
     """
@@ -112,7 +113,12 @@ def run_subagent(
     3. token_budget / timeout / max_rounds 资源管控
     """
     defn = definition
-    use_provider = provider
+    if provider is None:
+        if client is None:
+            raise TypeError("run_subagent requires provider or client")
+        use_provider = _CompatClientProvider(client)
+    else:
+        use_provider = provider
     use_model = defn.model or model
     system = _build_system_prompt(defn)
 
@@ -346,6 +352,64 @@ def _call_llm(
                 return None
             time.sleep(2 ** attempt)
     return None
+
+
+@dataclass(frozen=True)
+class _CompatToolCall:
+    id: str
+    name: str
+    arguments: str
+
+
+@dataclass(frozen=True)
+class _CompatLLMResult:
+    assistant_message: dict[str, Any]
+    finish_reason: str
+    tool_calls: list[_CompatToolCall] = field(default_factory=list)
+    usage_total_tokens: int = 0
+
+
+class _CompatClientProvider:
+    """兼容旧 tests / 调用方：把 OpenAI-style client 适配成 provider.complete()."""
+
+    def __init__(self, client: Any) -> None:
+        self._client = client
+
+    def complete(
+        self,
+        *,
+        model: str,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+        temperature: float | None = None,
+    ) -> _CompatLLMResult:
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "messages": messages,
+        }
+        if tools:
+            kwargs["tools"] = tools
+        if temperature is not None:
+            kwargs["temperature"] = temperature
+
+        response = self._client.chat.completions.create(**kwargs)
+        choice = response.choices[0]
+        message = getattr(choice, "message", None)
+        tool_calls = [
+            _CompatToolCall(
+                id=str(tc.id),
+                name=str(tc.function.name),
+                arguments=str(tc.function.arguments),
+            )
+            for tc in (getattr(message, "tool_calls", None) or [])
+        ]
+        usage_total_tokens = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
+        return _CompatLLMResult(
+            assistant_message=_msg_to_dict(message),
+            finish_reason=str(getattr(choice, "finish_reason", "") or ""),
+            tool_calls=tool_calls,
+            usage_total_tokens=int(usage_total_tokens),
+        )
 
 
 def _msg_to_dict(msg: Any) -> dict:

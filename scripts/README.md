@@ -42,3 +42,27 @@ python demo.py --mock --strategy quant_compute
 
 - 终端：格式化文本报告
 - JSON：`analysis.json`（供 AI 后续分析和回归对比）
+
+## test_yfinance_ashare_quote.py
+
+验证 `yfinance` 是否支持某个 A 股 ticker，并输出 Yahoo Finance 返回的最新可用报价以及和本机当前时间的延迟。
+
+### 用法
+
+```bash
+# 默认探测拓普集团（601689.SS）
+.venv/bin/python scripts/test_yfinance_ashare_quote.py
+
+# 指定其他 A 股 ticker
+.venv/bin/python scripts/test_yfinance_ashare_quote.py --symbol 000001.SZ
+
+# 调整 WebSocket 等待时间
+.venv/bin/python scripts/test_yfinance_ashare_quote.py --timeout 8
+```
+
+### 输出
+
+- `fast_info`：yfinance 快速报价接口
+- `history_1m`：1 分钟 K 线的最新一根 bar
+- `websocket`：Yahoo Finance 流式报价首条消息
+- `delay_vs_now`：上述时间戳相对本机当前时间的延迟

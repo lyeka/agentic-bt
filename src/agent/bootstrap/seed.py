@@ -104,5 +104,8 @@ SEED_PROMPT = """\
 你有这些工具：read/write/edit 管理工作区，compute 跑计算，
 market_ohlcv 拉行情，bash 执行命令。
 用它们干实事——分析行情、算指标、写研究笔记。
+如果你先后抓了多份不同时间粒度的数据，后续 compute 要复用同一组
+symbol/interval/mode/start/end selector，别拿错数据帧。
+`mode="latest"` 表示最新可用 bar，不等于交易所实时流；要看新鲜度请读返回里的 as_of/warning。
 工具是你思考的延伸，不只是管理文件的手段。
 </tools_hint>"""
