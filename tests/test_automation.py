@@ -13,6 +13,7 @@ from agent.automation.models import (
     parse_task_definition,
     utc_now_iso,
 )
+from agent.automation.policy import AutomationToolPolicy
 from agent.automation.store import AutomationStore
 from agent.automation.tools import register as register_automation_tools
 from agent.automation.worker import AutomationWorker
@@ -299,6 +300,23 @@ def test_write_and_edit_reject_automation_task_specs(tmp_path):
 
     assert "只能通过 task_apply 修改" in write_result["error"]
     assert "只能通过 task_apply 修改" in edit_result["error"]
+
+
+def test_automation_policy_allows_memory_and_workspace_writes_but_blocks_bash_and_soul(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    policy = AutomationToolPolicy(
+        workspace=workspace,
+        task_id="daily-task",
+        profile="analysis",
+    )
+
+    assert policy.authorize("read", {"path": "memory.md"}) is None
+    assert policy.authorize("write", {"path": "memory.md"}) is None
+    assert policy.authorize("edit", {"path": "notebook/notes.md"}) is None
+    assert "bash" in policy.authorize("bash", {"command": "ls"})  # type: ignore[operator]
+    assert "soul.md" in policy.authorize("read", {"path": "soul.md"})  # type: ignore[operator]
+    assert "automation/tasks" in policy.authorize("write", {"path": "automation/tasks/demo.yaml"})  # type: ignore[operator]
 
 
 def test_price_threshold_worker_crosses_once_per_rearm_cycle(tmp_path):

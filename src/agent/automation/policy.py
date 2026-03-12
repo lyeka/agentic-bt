@@ -37,26 +37,15 @@ class AutomationToolPolicy(ToolAccessPolicy):
     def authorize(self, name: str, args: dict[str, object]) -> str | None:
         if name in _ALWAYS_DENIED:
             return f"自动化任务禁止调用工具: {name}"
-        if name in {"write", "edit"}:
-            if self._profile != "report_writer":
-                return f"当前 tool_profile={self._profile}，禁止写入文件"
-            path = resolve_path(self._workspace, str(args.get("path", "")))
-            allowed = (self._workspace / "notebook" / "automation" / self._task_id).resolve()
-            if not path.is_relative_to(allowed):
-                return f"自动化任务只能写入 {allowed}"
-        if name == "read":
+        if name in {"read", "write", "edit"}:
             raw = str(args.get("path", ""))
             path = resolve_path(self._workspace, raw)
             if not path.is_relative_to(self._workspace.resolve()):
-                return "自动化任务不能读取 workspace 之外的路径"
-        if name in {"write", "edit", "read"}:
-            raw = str(args.get("path", ""))
-            path = resolve_path(self._workspace, raw)
-            blocked = {
+                return "自动化任务不能访问 workspace 之外的路径"
+            blocked = (
                 (self._workspace / "automation" / "tasks").resolve(),
                 (self._workspace / "soul.md").resolve(),
-                (self._workspace / "memory.md").resolve(),
-            }
+            )
             if any(path == item or path.is_relative_to(item) for item in blocked):
                 return f"自动化任务不能访问路径: {raw}"
         return None
