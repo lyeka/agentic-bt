@@ -26,6 +26,9 @@ dev = [
 telegram = [
     "python-telegram-bot>=22.6",
 ]
+discord = [
+    "discord.py>=2.4",
+]
 finnhub = [
     "finnhub-python>=2.4.20",
 ]

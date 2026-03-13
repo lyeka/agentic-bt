@@ -143,6 +143,7 @@ class FakeBackend:
         self.confirm_prompts: list[tuple[str, str]] = []
         self.confirm_result: bool = False
         self._msg_seq = 0
+        self.max_text_len = 3900
 
     async def send_text(self, conversation_id: str, text: str) -> OutboundRef:
         self.sent.append((conversation_id, text))
@@ -440,3 +441,29 @@ def test_reply_to_automation_push_binds_run_refs(tmp_path):
         "automation_task": "task-1",
         "automation_run": "task-1-run-1",
     }
+
+
+def test_reply_is_chunked_by_backend_limit(tmp_path):
+    imctx = given_backend(tmp_path)
+    imctx = given_default_driver(imctx, "u1")
+    imctx["backend"].max_text_len = 7
+    driver: IMDriver = imctx["driver"]
+
+    msg = InboundMessage(
+        adapter="test",
+        conversation_id="chunk-1",
+        user_id="u1",
+        is_private=True,
+        text="abcdefghij",
+        message_id="m-chunk",
+        ts=datetime.now(),
+    )
+
+    async def _run() -> None:
+        await driver.handle(msg)
+        await asyncio.sleep(0)
+
+    asyncio.run(_run())
+
+    texts = [text for _cid, text in imctx["backend"].sent]
+    assert texts == ["reply:a", "bcdefgh", "ij"]

@@ -19,7 +19,7 @@ from dotenv import load_dotenv
 
 from agent.adapters.market.schema import build_market_query
 from agent.automation.cron import SimpleCron
-from agent.automation.delivery import TelegramDeliveryChannel, WebhookDeliveryChannel
+from agent.automation.delivery import DiscordDeliveryChannel, TelegramDeliveryChannel, WebhookDeliveryChannel
 from agent.automation.executor import AutomationExecutor
 from agent.automation.models import PriceThresholdTrigger, TaskDefinition, TaskRuntimeState, TriggerEvent
 from agent.automation.store import AutomationStore
@@ -205,6 +205,9 @@ def _parse_dt(text: str, fallback_tz) -> datetime:
 
 def _build_delivery_channels() -> dict[str, object]:
     channels: dict[str, object] = {"webhook": WebhookDeliveryChannel()}
+    discord_token = os.getenv("DISCORD_BOT_TOKEN")
+    if discord_token:
+        channels["discord"] = DiscordDeliveryChannel(bot_token=discord_token)
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if token:
         channels["telegram"] = TelegramDeliveryChannel(bot_token=token)

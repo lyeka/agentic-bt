@@ -211,7 +211,7 @@ def register(
             "价格监控任务必须写 trigger.type='price_threshold'、symbol、interval、condition、threshold、poll_sec。"
             "reaction 只描述一次执行：executor + prompt_template；不要把 reaction 写成 tools/steps 工作流。"
             "如果想让触发后去获取行情、计算、研究，请把目标写进 reaction.prompt_template，让 agent 在运行时自己调用现有工具。"
-            "如果当前是在 Telegram 会话里创建任务，且要推送到当前聊天，不要手动填写 telegram 的 target；系统会自动绑定当前 chat_id。"
+            "如果当前是在 Telegram/Discord 会话里创建任务，且要推送到当前会话，不要手动填写当前 IM 渠道的 target；系统会自动绑定当前 conversation_id。"
             "如果返回 needs_clarification 或 error，不要改去调用 task_apply、task_context、bash、market_ohlcv 来补救创建流程。"
         ),
         parameters={
@@ -292,8 +292,8 @@ def register(
                             "type": "object",
                             "description": (
                                 "投递配置。只描述 pre_alert/final_result/on_failure 和 channels。"
-                                "在 Telegram 会话里，如要推送到当前聊天，只需把 channel.type 写成 telegram，"
-                                "或直接省略 target；系统会自动补当前 chat_id。"
+                                "在 Telegram/Discord 会话里，如要推送到当前会话，只需把 channel.type 写成当前 IM 渠道，"
+                                "或直接省略 target；系统会自动补当前 conversation_id。"
                             ),
                         },
                     },
@@ -365,9 +365,13 @@ def _task_id(raw_id: Any, raw_name: Any) -> str:
     return out or f"task-{uuid.uuid4().hex[:8]}"
 
 
+def _is_im_delivery_adapter(adapter_name: str) -> bool:
+    return adapter_name in {"telegram", "discord"}
+
+
 def _default_channels(adapter_name: str, conversation_id: str) -> list[dict[str, Any]]:
-    if adapter_name == "telegram":
-        return [{"type": "telegram", "target": conversation_id}]
+    if _is_im_delivery_adapter(adapter_name):
+        return [{"type": adapter_name, "target": conversation_id}]
     return [{"type": "none", "target": ""}]
 
 
@@ -392,7 +396,7 @@ def _normalize_delivery_channel(
 ) -> dict[str, Any]:
     if isinstance(raw_channel, str):
         channel_type = raw_channel.strip() or "none"
-        target = conversation_id if channel_type == "telegram" and adapter_name == "telegram" else ""
+        target = conversation_id if channel_type == adapter_name and _is_im_delivery_adapter(adapter_name) else ""
         if channel_type == "none":
             target = ""
         return {"type": channel_type, "target": target}
@@ -401,7 +405,7 @@ def _normalize_delivery_channel(
     channel = dict(raw_channel)
     channel_type = str(channel.get("type") or "none").strip() or "none"
     target = str(channel.get("target") or "").strip()
-    if channel_type == "telegram" and not target and adapter_name == "telegram":
+    if channel_type == adapter_name and not target and _is_im_delivery_adapter(adapter_name):
         target = conversation_id
     if channel_type == "none":
         target = ""

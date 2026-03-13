@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 import pandas as pd
 
 from agent.adapters.market.schema import build_market_query, make_fetch_result
+from agent.automation.delivery import DiscordDeliveryChannel, TelegramDeliveryChannel, WebhookDeliveryChannel
 from agent.automation.models import (
     TaskRun,
     TriggerEvent,
@@ -16,9 +17,10 @@ from agent.automation.models import (
 from agent.automation.policy import AutomationToolPolicy
 from agent.automation.store import AutomationStore
 from agent.automation.tools import register as register_automation_tools
-from agent.automation.worker import AutomationWorker
+from agent.automation.worker import AutomationWorker, _build_delivery_channels as _build_worker_delivery_channels
 from agent.kernel import ExecutionContext, Kernel
 from agent.messages import ContextRef
+from agent.runtime import _build_automation_delivery_channels
 from agent.tools import edit, write
 
 
@@ -302,6 +304,146 @@ def test_task_plan_fills_current_telegram_target_for_partial_delivery(tmp_path):
     assert draft["task"]["delivery"]["on_failure"]["channels"] == [
         {"type": "telegram", "target": "12345"}
     ]
+
+
+def test_task_plan_empty_delivery_defaults_to_current_discord_dm(tmp_path):
+    store = AutomationStore(workspace=tmp_path / "workspace", state=tmp_path / "state")
+    kernel = Kernel(api_key="test")
+    register_automation_tools(
+        kernel,
+        store=store,
+        adapter_name="discord",
+        conversation_id="67890",
+        default_timezone="Asia/Shanghai",
+    )
+
+    draft = kernel._tools["task_plan"].handler(
+        {
+            "task": {
+                "name": "discord-delivery-default",
+                "description": "push to current discord dm",
+                "trigger": {
+                    "type": "cron",
+                    "cron_expr": "0 9 * * *",
+                },
+                "reaction": {
+                    "executor": {"type": "main_agent"},
+                    "prompt_template": "Send me a market summary.",
+                },
+                "delivery": {},
+            }
+        }
+    )
+
+    assert draft["task"]["delivery"]["final_result"]["channels"] == [
+        {"type": "discord", "target": "67890"}
+    ]
+    assert draft["task"]["delivery"]["on_failure"]["channels"] == [
+        {"type": "discord", "target": "67890"}
+    ]
+
+
+def test_task_plan_fills_current_discord_target_for_partial_delivery(tmp_path):
+    store = AutomationStore(workspace=tmp_path / "workspace", state=tmp_path / "state")
+    kernel = Kernel(api_key="test")
+    register_automation_tools(
+        kernel,
+        store=store,
+        adapter_name="discord",
+        conversation_id="67890",
+        default_timezone="Asia/Shanghai",
+    )
+
+    draft = kernel._tools["task_plan"].handler(
+        {
+            "task": {
+                "name": "discord-delivery-partial",
+                "description": "push to current discord dm",
+                "trigger": {
+                    "type": "cron",
+                    "cron_expr": "0 9 * * *",
+                },
+                "reaction": {
+                    "executor": {"type": "main_agent"},
+                    "prompt_template": "Send me a market summary.",
+                },
+                "delivery": {
+                    "final_result": {
+                        "enabled": True,
+                        "channels": ["discord"],
+                    },
+                    "on_failure": {
+                        "enabled": True,
+                        "channels": [{"type": "discord"}],
+                    },
+                },
+            }
+        }
+    )
+
+    assert draft["task"]["delivery"]["final_result"]["channels"] == [
+        {"type": "discord", "target": "67890"}
+    ]
+    assert draft["task"]["delivery"]["on_failure"]["channels"] == [
+        {"type": "discord", "target": "67890"}
+    ]
+
+
+def test_delivery_channels_chunk_long_messages_into_multiple_receipts():
+    telegram_payloads: list[tuple[str, str]] = []
+    telegram = TelegramDeliveryChannel(
+        bot_token="token",
+        sender=lambda target, text: telegram_payloads.append((target, text)) or str(len(telegram_payloads)),
+    )
+    telegram_text = "A" * 4001
+    telegram_receipts = telegram.send(
+        target="12345",
+        text=telegram_text,
+        task_id="task-1",
+        run_id="run-1",
+        kind="final_result",
+    )
+    assert len(telegram_receipts) == 2
+    assert [len(text) for _target, text in telegram_payloads] == [3900, 101]
+
+    discord_payloads: list[tuple[str, str]] = []
+    discord = DiscordDeliveryChannel(
+        bot_token="token",
+        sender=lambda target, text: discord_payloads.append((target, text)) or str(len(discord_payloads)),
+    )
+    discord_text = "B" * 1901
+    discord_receipts = discord.send(
+        target="67890",
+        text=discord_text,
+        task_id="task-2",
+        run_id="run-2",
+        kind="final_result",
+    )
+    assert len(discord_receipts) == 2
+    assert [len(text) for _target, text in discord_payloads] == [1900, 1]
+
+    webhook = WebhookDeliveryChannel(sender=lambda target, payload: "webhook-1")
+    webhook_receipts = webhook.send(
+        target="https://example.com/hook",
+        text="done",
+        task_id="task-3",
+        run_id="run-3",
+        kind="final_result",
+    )
+    assert len(webhook_receipts) == 1
+
+
+def test_runtime_and_worker_register_discord_delivery_channel_from_env(monkeypatch):
+    monkeypatch.setenv("DISCORD_BOT_TOKEN", "discord-token")
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "telegram-token")
+
+    runtime_channels = _build_automation_delivery_channels()
+    worker_channels = _build_worker_delivery_channels()
+
+    assert isinstance(runtime_channels["discord"], DiscordDeliveryChannel)
+    assert isinstance(runtime_channels["telegram"], TelegramDeliveryChannel)
+    assert isinstance(worker_channels["discord"], DiscordDeliveryChannel)
+    assert isinstance(worker_channels["telegram"], TelegramDeliveryChannel)
 
 
 def test_task_apply_and_control_do_not_require_confirm(tmp_path):

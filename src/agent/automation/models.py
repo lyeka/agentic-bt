@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 
 TASK_STATUSES = {"active", "paused", "archived"}
-DELIVERY_CHANNELS = {"telegram", "webhook", "none"}
+DELIVERY_CHANNELS = {"discord", "telegram", "webhook", "none"}
 EXECUTOR_TYPES = {"main_agent", "skill", "subagent"}
 TOOL_PROFILES = {"analysis", "report_writer"}
 TRIGGER_TYPES = {"cron", "price_threshold"}
@@ -236,8 +236,8 @@ class DeliveryReceipt:
     created_at: str = field(default_factory=utc_now_iso)
 
     def __post_init__(self) -> None:
-        if self.channel not in {"telegram", "webhook"}:
-            raise ValueError("channel 必须是 telegram 或 webhook")
+        if self.channel not in {"discord", "telegram", "webhook"}:
+            raise ValueError("channel 必须是 discord、telegram 或 webhook")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

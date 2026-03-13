@@ -29,6 +29,7 @@
 ### adapters/
 `__init__.py`: 适配器层入口
 `cli.py`: CLI REPL 入口（dotenv + runtime 统一组装 + state_dir Session 持久化 + 旧会话迁移 + /new /compact /context /help 命令路由）
+`discord.py`: Discord Bot 入口（DM-only + allowlist + InboundMessage 映射 + IMDriver 驱动 + 图片附件 + 按钮确认）
 `telegram.py`: Telegram Bot 入口（polling + allowlist + InboundMessage 映射 + IMDriver 驱动 + markdown->HTML 基础渲染 + 过程消息开关）
 
 ### adapters/tui/
@@ -46,6 +47,7 @@
 `driver.py`: IMDriver（鉴权/命令路由 /new /reset /compact /context /status /help/并发锁/进度状态更新/confirm 桥接/session 落盘）
 `confirm_bridge.py`: async confirm -> sync bool 桥接（给 Kernel.on_confirm）
 `progress.py`: 进度缓冲与渲染（状态消息行聚合）
+`text.py`: IM/Delivery 共用长文本分片（按平台上限切块）
 
 ### adapters/market/
 `__init__.py`: 市场数据适配器入口
