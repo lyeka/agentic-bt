@@ -146,6 +146,55 @@ def _message_text(message: Any) -> str:
     return str(getattr(message, "text", None) or getattr(message, "caption", None) or "")
 
 
+def _parse_confirm_callback(data: str) -> tuple[str, bool] | None:
+    if not str(data or "").startswith("confirm:"):
+        return None
+    try:
+        _, rest = str(data).split("confirm:", 1)
+        confirm_id, flag = rest.rsplit(":", 1)
+    except ValueError:
+        return None
+    if flag not in {"y", "n"}:
+        return None
+    return confirm_id, flag == "y"
+
+
+async def _handle_confirm_callback(query: Any, confirm_waiters: dict[str, asyncio.Future]) -> bool:
+    parsed = _parse_confirm_callback(str(getattr(query, "data", "") or ""))
+    if parsed is None:
+        return False
+
+    confirm_id, approved = parsed
+    fut = confirm_waiters.get(confirm_id)
+    if fut is None or fut.done():
+        try:
+            await query.answer("该确认已失效")
+        except Exception:
+            pass
+        return True
+
+    fut.set_result(approved)
+
+    decision_text = "已批准" if approved else "已拒绝"
+    message = getattr(query, "message", None)
+    if message is not None:
+        original = _message_text(message).strip()
+        updated = f"{original}\n\n{decision_text}" if original else decision_text
+        try:
+            await query.edit_message_text(updated)
+        except Exception:
+            try:
+                await query.edit_message_reply_markup(reply_markup=None)
+            except Exception:
+                pass
+
+    try:
+        await query.answer(decision_text)
+    except Exception:
+        pass
+    return True
+
+
 def _safe_file_name(raw: str | None, *, fallback: str) -> str:
     name = (raw or "").strip()
     if not name:
@@ -363,24 +412,9 @@ def main() -> None:
 
     async def on_callback_query(update: Update, context: Any) -> None:
         query = update.callback_query
-        if query is None or not query.data:
+        if query is None:
             return
-        data = str(query.data)
-        if not data.startswith("confirm:"):
-            return
-        # confirm:{confirm_id}:{y|n}
-        try:
-            _, rest = data.split("confirm:", 1)
-            confirm_id, flag = rest.rsplit(":", 1)
-        except ValueError:
-            return
-        fut = confirm_waiters.get(confirm_id)
-        if fut is not None and not fut.done():
-            fut.set_result(flag == "y")
-        try:
-            await query.answer()
-        except Exception:
-            pass
+        await _handle_confirm_callback(query, confirm_waiters)
 
     async def on_message(update: Update, context: Any) -> None:
         if update.effective_chat is None or update.effective_user is None:
@@ -426,6 +460,11 @@ def main() -> None:
             is_private=(chat.type == "private"),
             text=text,
             message_id=str(update.message.message_id),
+            reply_to_message_id=(
+                str(update.message.reply_to_message.message_id)
+                if getattr(update.message, "reply_to_message", None) is not None
+                else None
+            ),
             ts=update.message.date,
             attachments=attachments,
         )

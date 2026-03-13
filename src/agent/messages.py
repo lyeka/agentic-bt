@@ -12,6 +12,7 @@ from typing import Any
 
 
 SUPPORTED_ATTACHMENT_KINDS = {"image", "audio", "file"}
+SUPPORTED_REF_KINDS = {"automation_run", "automation_task"}
 TEXT_PART_TYPE = "text"
 
 
@@ -34,11 +35,26 @@ class AttachmentRef:
 
 
 @dataclass(frozen=True)
+class ContextRef:
+    """单轮上下文引用。当前用于自动化 task/run 的默认选择器绑定。"""
+
+    kind: str
+    value: str
+
+    def __post_init__(self) -> None:
+        if self.kind not in SUPPORTED_REF_KINDS:
+            raise ValueError(f"unsupported ref kind: {self.kind}")
+        if not str(self.value or "").strip():
+            raise ValueError("ref value cannot be empty")
+
+
+@dataclass(frozen=True)
 class TurnInput:
     """单轮输入：文本 + 附件。"""
 
     text: str = ""
     attachments: tuple[AttachmentRef, ...] = ()
+    refs: tuple[ContextRef, ...] = ()
 
     def has_attachments(self) -> bool:
         return bool(self.attachments)

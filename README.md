@@ -90,6 +90,24 @@ python -m agent.adapters.telegram
 - `TELEGRAM_SHOW_PROCESS_MESSAGES` 默认 `false`：关闭中间过程消息（如 tool 调用进度）
 - `TELEGRAM_RENDER_MODE` 默认 `html`：对 LLM markdown 做基础渲染（支持标题/列表/粗斜体/代码块）
 
+### Automation Worker
+
+```bash
+# 与 Telegram/CLI 分开启动
+python -m agent.automation.worker
+```
+
+说明：
+
+- 任务定义写入 `workspace/automation/tasks/*.yaml`
+- 运行态和 run 记录写入 `STATE_DIR/automation/`
+- 当前支持 `cron` 和 `price_threshold` 两类 trigger
+- 只有真正触发事件后才会启动一次 agent/skill/subagent reaction
+- Telegram 中回复某条自动推送消息时，后续沟通仍在原私聊会话里，但 agent 能通过 `task_context` 默认定位到对应 run/task
+- 相关环境变量：
+  - `AUTOMATION_DEFAULT_TIMEZONE`，默认 `Asia/Shanghai`
+  - `AUTOMATION_TASK_SCAN_SEC`，默认 `30`
+
 ### 回测框架 Demo
 
 ```bash
@@ -360,6 +378,7 @@ agentic-bt/
 │   │   ├── kernel.py              # Kernel（ReAct + wire/emit + DataStore + Permission + boot）
 │   │   ├── subagents.py           # SubAgentSystem（发现/解析/注册/调用/工具生成）
 │   │   ├── skills.py              # Skill Engine（发现/注入/显式展开）
+│   │   ├── automation/            # 自动化任务（task tools · worker · delivery · store）
 │   │   ├── tools/
 │   │   │   ├── read.py            # 文件读取
 │   │   │   ├── write.py           # 文件写入
@@ -398,7 +417,7 @@ agentic-bt/
 │
 ├── examples/strategies.py         # 8 策略注册表（Mock Agent + LLM Prompt）
 ├── scripts/                       # trace 分析脚本
-└── docs/                          # 13 篇设计文档（agent-design.md 是 Agent 唯一活文档）
+└── docs/                          # 设计文档（含 agent-design.md / automation.md）
 ```
 
 ---
@@ -414,12 +433,12 @@ agentic-bt/
 | 阶段 | 状态 | 亮点 |
 |------|------|------|
 | **agent Phase 1** | 完成 | Kernel + 6 工具 + Soul/Memory + 自举 + Session 持久化 |
-| **agent Phase 2** | 进行中 | Telegram · IM 通用驱动 · Skill Engine · **Sub-Agent 子代理系统** · 会话上下文管理 |
+| **agent Phase 2** | 进行中 | Telegram · IM 通用驱动 · Skill Engine · Sub-Agent · 自动化任务（cron / 价格阈值 / 主动推送） |
 | **agent Phase 3** | 未来 | 成长循环（reflections → beliefs → soul 微调）· 并行 SubAgent · /backtest skill |
 | agenticbt V1 | 完成 | 单资产 · 市价单 · BDD 驱动 · Mock + 真实 LLM |
 | agenticbt V2 | 完成 | 多资产 · bracket/limit/stop · 风控 4 检查 · ~190 BDD scenarios |
 
-设计文档：[docs/agent-design.md](docs/agent-design.md)（Agent 唯一活文档）· [docs/skills.md](docs/skills.md)（Skill Engine 集成）· [docs/roadmap.md](docs/roadmap.md)
+设计文档：[docs/agent-design.md](docs/agent-design.md)（Agent 主设计）· [docs/automation.md](docs/automation.md)（自动化机制）· [docs/skills.md](docs/skills.md)（Skill Engine 集成）· [docs/roadmap.md](docs/roadmap.md)
 
 ---
 

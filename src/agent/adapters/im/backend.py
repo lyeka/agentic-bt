@@ -23,6 +23,7 @@ class InboundMessage:
     text: str
     message_id: str
     ts: datetime
+    reply_to_message_id: str | None = None
     attachments: tuple[AttachmentRef, ...] = ()
 
 
