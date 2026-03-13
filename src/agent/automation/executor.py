@@ -206,15 +206,16 @@ class AutomationExecutor:
             backend = self._delivery_channels.get(channel.type)
             if backend is None:
                 continue
-            receipt = backend.send(
+            items = backend.send(
                 target=channel.target,
                 text=text,
                 task_id=task.id,
                 run_id=run_id,
                 kind=kind,
             )
-            self._store.save_receipt(receipt)
-            receipts.append(receipt)
+            for receipt in items:
+                self._store.save_receipt(receipt)
+                receipts.append(receipt)
         return receipts
 
     def _render_prompt(self, task: TaskDefinition, event: TriggerEvent) -> str:

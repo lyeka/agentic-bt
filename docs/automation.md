@@ -164,11 +164,13 @@ Reaction 不是 workflow，而是“一次执行”。
 
 当前 delivery channel：
 
+- `discord`
 - `telegram`
 - `webhook`
 - `none`
 
 所有主动推送都会记录 `DeliveryReceipt`，用于后续 reply-to-run 绑定。
+如果任务是在 Telegram/Discord 当前私聊会话里创建的，只写对应 `channel.type` 即可；系统会自动补当前 `conversation_id` 作为 target。
 
 ## 8. 对话桥接
 
@@ -260,18 +262,18 @@ delivery:
   pre_alert:
     enabled: false
     channels:
-      - type: telegram
-        target: "123456"
+      - type: discord
+        target: "987654321012345678"
   final_result:
     enabled: true
     channels:
-      - type: telegram
-        target: "123456"
+      - type: discord
+        target: "987654321012345678"
   on_failure:
     enabled: true
     channels:
-      - type: telegram
-        target: "123456"
+      - type: discord
+        target: "987654321012345678"
 ```
 
 ### 12.2 价格阈值监控

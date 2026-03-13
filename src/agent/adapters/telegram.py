@@ -299,6 +299,7 @@ class TelegramBackend:
     bot: Any
     _confirm_waiters: dict[str, asyncio.Future]  # confirm_id -> Future[bool]
     render_mode: str = "html"  # none | markdown | html
+    max_text_len: int = 3900
 
     def _prepare_text(self, text: str) -> tuple[str, str | None]:
         if self.render_mode == "none":

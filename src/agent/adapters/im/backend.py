@@ -36,6 +36,8 @@ class OutboundRef:
 class IMBackend(Protocol):
     """平台后端需要实现的最小能力集合。"""
 
+    max_text_len: int
+
     async def send_text(self, conversation_id: str, text: str) -> OutboundRef: ...
 
     async def edit_text(self, ref: OutboundRef, text: str) -> None: ...

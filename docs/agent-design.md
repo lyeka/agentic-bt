@@ -214,7 +214,7 @@ read/write/edit 的覆盖范围：
 7. **渐进式上下文**：默认注入索引/摘要；需要时再加载细节，避免上下文膨胀
 8. **安全默认拒绝**：高风险动作、灵魂修改默认需要显式确认
 9. **可审计**：关键决策、灵魂/信念变更、工具调用都有事件日志可追溯
-10. **渠道无关**：Telegram/CLI 都是适配器；会话、任务、skills 的语义一致
+10. **渠道无关**：Telegram/Discord/CLI 都是适配器；会话、任务、skills 的语义一致
 
 #### 关键取舍
 
@@ -233,7 +233,7 @@ read/write/edit 的覆盖范围：
 ```
                     ┌─────────────────────┐
                     │     Adapters         │
-                    │  CLI  /  Telegram    │
+                    │ CLI / Telegram / Discord │
                     └────────┬────────────┘
                              │
                     ┌────────▼────────────┐
@@ -734,6 +734,7 @@ Agent 输出任务设计稿：
 | TushareAdapter | ✅ | A 股 1d/history + 分钟 history + latest bar |
 | CsvAdapter | ✅ | 测试用 |
 | Telegram adapter | ✅ | polling + allowlist + IMDriver（channel-agnostic） |
+| Discord adapter | ✅ | DM-only + allowlist + IMDriver（channel-agnostic） |
 | Adapter 公共 Setup | ✅ | runtime.py 统一工具注册/权限/管道/trace/session 组装 |
 
 ### 高级能力

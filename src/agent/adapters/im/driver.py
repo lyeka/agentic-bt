@@ -16,51 +16,11 @@ from typing import Callable
 from agent.adapters.im.backend import IMBackend, InboundMessage, OutboundRef
 from agent.adapters.im.confirm_bridge import make_sync_confirm
 from agent.adapters.im.progress import ProgressBuffer
+from agent.adapters.im.text import chunk_text
 from agent.kernel import Session
 from agent.messages import ContextRef, TurnInput
 from agent.automation.store import AutomationStore
 from agent.runtime import AgentConfig, KernelBundle, build_kernel_bundle
-
-
-def _chunk_text(text: str, *, max_len: int = 3900) -> list[str]:
-    """保守分片：优先按段落/换行切分，避免触发平台 4096 限制。"""
-    s = (text or "").strip()
-    if not s:
-        return [""]
-
-    if len(s) <= max_len:
-        return [s]
-
-    # 先按空行分段
-    parts: list[str] = []
-    buf = ""
-    for para in s.split("\n\n"):
-        para = para.strip()
-        if not para:
-            continue
-        candidate = (buf + ("\n\n" if buf else "") + para) if buf else para
-        if len(candidate) <= max_len:
-            buf = candidate
-            continue
-        if buf:
-            parts.append(buf)
-            buf = ""
-        # 段落仍过长 → 再按换行切
-        for line in para.split("\n"):
-            line = line.rstrip()
-            candidate2 = (buf + "\n" + line) if buf else line
-            if len(candidate2) <= max_len:
-                buf = candidate2
-            else:
-                if buf:
-                    parts.append(buf)
-                buf = ""
-                # 最后兜底硬切
-                for i in range(0, len(line), max_len):
-                    parts.append(line[i : i + max_len])
-    if buf:
-        parts.append(buf)
-    return parts
 
 
 @dataclass
@@ -211,7 +171,7 @@ class IMDriver:
                 chat.progress.append("done")
                 chat.status_updater.request_flush()
 
-            for chunk in _chunk_text(reply):
+            for chunk in chunk_text(reply, max_len=self._backend.max_text_len):
                 if chunk:
                     await self._backend.send_text(msg.conversation_id, chunk)
 

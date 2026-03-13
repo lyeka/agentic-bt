@@ -90,10 +90,31 @@ python -m agent.adapters.telegram
 - `TELEGRAM_SHOW_PROCESS_MESSAGES` 默认 `false`：关闭中间过程消息（如 tool 调用进度）
 - `TELEGRAM_RENDER_MODE` 默认 `html`：对 LLM markdown 做基础渲染（支持标题/列表/粗斜体/代码块）
 
+### Discord Bot（DM-only）
+
+```bash
+# 1) 安装 Discord 依赖
+.venv/bin/pip install -e ".[discord]"
+
+# 2) 配置 .env（最少需要这三项）
+# API_KEY=...
+# DISCORD_BOT_TOKEN=...
+# DISCORD_ALLOWED_USER_IDS=123456789012345678
+
+# 3) 启动
+python -m agent.adapters.discord
+```
+
+说明：
+- 仅支持 Discord 私聊（DM）；服务器频道消息会被提示改用私聊
+- 需要在 Discord Developer Portal 为 bot 开启 `MESSAGE CONTENT INTENT`
+- 默认 owner-only（`DISCORD_ALLOWED_USER_IDS`），未配置时只回显你的 `user_id` 并拒绝执行
+- `DISCORD_SHOW_PROCESS_MESSAGES` 默认 `false`：关闭中间过程消息（如 tool 调用进度）
+
 ### Automation Worker
 
 ```bash
-# 与 Telegram/CLI 分开启动
+# 与 Telegram/Discord/CLI 分开启动
 python -m agent.automation.worker
 ```
 
@@ -103,7 +124,7 @@ python -m agent.automation.worker
 - 运行态和 run 记录写入 `STATE_DIR/automation/`
 - 当前支持 `cron` 和 `price_threshold` 两类 trigger
 - 只有真正触发事件后才会启动一次 agent/skill/subagent reaction
-- Telegram 中回复某条自动推送消息时，后续沟通仍在原私聊会话里，但 agent 能通过 `task_context` 默认定位到对应 run/task
+- Telegram/Discord 中回复某条自动推送消息时，后续沟通仍在原私聊会话里，但 agent 能通过 `task_context` 默认定位到对应 run/task
 - 相关环境变量：
   - `AUTOMATION_DEFAULT_TIMEZONE`，默认 `Asia/Shanghai`
   - `AUTOMATION_TASK_SCAN_SEC`，默认 `30`
@@ -136,7 +157,7 @@ OPENAI_API_KEY=sk-... python demo.py --provider openai --csv your_data.csv
 ### agent — 持久投资助手
 
 ```
-Adapters (CLI / Telegram)
+Adapters (CLI / Telegram / Discord)
        │
     Kernel
     ├── turn()       ← ReAct loop（SubAgent 对主循环透明）
@@ -389,6 +410,7 @@ agentic-bt/
 │   │   │   └── web.py             # 搜索 + 抓取
 │   │   ├── adapters/
 │   │   │   ├── cli.py             # CLI REPL
+│   │   │   ├── discord.py         # Discord Bot（DM-only）
 │   │   │   ├── telegram.py        # Telegram Bot
 │   │   │   ├── im/                # IM 通用驱动层
 │   │   │   ├── market/            # TushareAdapter · YFinanceAdapter · FinnhubAdapter · Composite
@@ -433,7 +455,7 @@ agentic-bt/
 | 阶段 | 状态 | 亮点 |
 |------|------|------|
 | **agent Phase 1** | 完成 | Kernel + 6 工具 + Soul/Memory + 自举 + Session 持久化 |
-| **agent Phase 2** | 进行中 | Telegram · IM 通用驱动 · Skill Engine · Sub-Agent · 自动化任务（cron / 价格阈值 / 主动推送） |
+| **agent Phase 2** | 进行中 | Telegram / Discord · IM 通用驱动 · Skill Engine · Sub-Agent · 自动化任务（cron / 价格阈值 / 主动推送） |
 | **agent Phase 3** | 未来 | 成长循环（reflections → beliefs → soul 微调）· 并行 SubAgent · /backtest skill |
 | agenticbt V1 | 完成 | 单资产 · 市价单 · BDD 驱动 · Mock + 真实 LLM |
 | agenticbt V2 | 完成 | 多资产 · bracket/limit/stop · 风控 4 检查 · ~190 BDD scenarios |

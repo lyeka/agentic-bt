@@ -190,9 +190,12 @@ def _build_market_adapter(config: AgentConfig) -> object:
 
 
 def _build_automation_delivery_channels() -> dict[str, object]:
-    from agent.automation.delivery import TelegramDeliveryChannel, WebhookDeliveryChannel
+    from agent.automation.delivery import DiscordDeliveryChannel, TelegramDeliveryChannel, WebhookDeliveryChannel
 
     channels: dict[str, object] = {"webhook": WebhookDeliveryChannel()}
+    discord_token = os.getenv("DISCORD_BOT_TOKEN")
+    if discord_token:
+        channels["discord"] = DiscordDeliveryChannel(bot_token=discord_token)
     token = os.getenv("TELEGRAM_BOT_TOKEN")
     if token:
         channels["telegram"] = TelegramDeliveryChannel(bot_token=token)

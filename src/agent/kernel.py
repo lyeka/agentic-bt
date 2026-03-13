@@ -95,10 +95,10 @@ AUTOMATION_GUIDE = """\
    - prompt_template: 触发后要 agent 做什么
    如果触发后需要 market_ohlcv、compute、research 等能力，让 reaction 里的 agent 自己决定调用。
 7. delivery 只描述投递，不描述分析流程。
-   如果当前是在 Telegram 会话里，并且任务要推送到当前聊天：
+   如果当前是在 Telegram 或 Discord 会话里，并且任务要推送到当前会话：
    - 可以完全省略 delivery
-   - 或只写 channel.type='telegram'
-   - 不要自己填写 telegram.target，系统会自动绑定当前 chat_id
+   - 或只写 channel.type 为当前 IM 渠道
+   - 不要自己填写当前 IM 渠道的 target，系统会自动绑定当前 conversation_id
 8. 如果 task_plan 报字段错误，优先检查：
    - 是否误写了 schedule 而不是 trigger
    - 是否误写了 cron 而不是 cron_expr
