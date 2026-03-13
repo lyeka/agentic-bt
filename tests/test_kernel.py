@@ -120,6 +120,22 @@ def test_msg_to_dict_preserves_reasoning_content():
     assert result["reasoning_content"] == "internal reasoning"
 
 
+def test_workspace_guide_emphasizes_growth_and_investment_memory():
+    assert "主动成长型 agent" in WORKSPACE_GUIDE
+    assert "持仓、成本、仓位、关注方向、风险偏好、投资目标" in WORKSPACE_GUIDE
+    assert "记住 / 以后注意 / 重要提醒" in WORKSPACE_GUIDE
+    assert "口头说“我记住了”，但没有落盘" in WORKSPACE_GUIDE
+
+
+def test_seed_prompt_bootstraps_on_first_durable_signal():
+    from agent.bootstrap.seed import SEED_PROMPT
+
+    assert "出现第一个明确耐久信号时，你就该动手" in SEED_PROMPT
+    assert "长期偏好、持仓、关注方向、风险边界、投资目标" in SEED_PROMPT
+    assert "不要为了建档而建档" in SEED_PROMPT
+    assert "记住" in SEED_PROMPT and "重要提醒" in SEED_PROMPT
+
+
 def test_kernel_emits_llm_call_error_on_provider_exception():
     kernel = Kernel()
     session = Session()

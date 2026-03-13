@@ -295,7 +295,8 @@ def build_kernel_bundle(
     )
 
     # permissions
-    kernel.permission("soul.md", Permission.USER_CONFIRM)
+    # soul.md 允许主 Agent 直接成长；自动化任务仍由 AutomationToolPolicy 单独阻止。
+    kernel.permission("soul.md", Permission.FREE)
     kernel.permission("memory.md", Permission.FREE)
     kernel.permission("notebook/**", Permission.FREE)
     kernel.permission("automation/tasks/**", Permission.USER_CONFIRM)

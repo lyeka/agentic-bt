@@ -66,7 +66,7 @@ cp .env.example .env
 python -m agent.adapters.cli
 ```
 
-首次启动时工作区为空，Agent 通过种子对话了解你的投资风格，然后用 `write` 工具自己创建 `soul.md` 和 `memory.md`。之后每次启动自动加载身份与记忆。
+首次启动时工作区为空。Agent 会先自然对话，但只要对话里出现第一个明确的耐久信号（如持仓、关注方向、长期偏好、重要提醒），就会用 `write` / `edit` 自己创建或更新 `soul.md` 和 `memory.md`。之后每次启动自动加载身份与记忆。
 
 ### Telegram Bot（Polling）
 
@@ -220,7 +220,7 @@ kernel.subagent(SubAgentDef(
 
 # 声明式管道 + 权限
 kernel.wire("write:soul.md", lambda e, d: kernel._assemble_system_prompt())
-kernel.permission("soul.md", Permission.USER_CONFIRM)
+kernel.permission("soul.md", Permission.FREE)
 
 # 对话（主 Agent 可自动委派任务给 analyst）
 session = Session(session_id="demo")
