@@ -40,6 +40,7 @@ def register(
     adapter_name: str,
     conversation_id: str,
     default_timezone: str,
+    manual_trigger: Any | None = None,
 ) -> None:
     def task_plan_handler(args: dict) -> dict:
         raw_task = dict(args.get("task") or {})
@@ -167,6 +168,12 @@ def register(
         task = store.load_task(task_id)
         if task is None:
             return {"error": f"未找到 task: {task_id}"}
+        if action == "trigger":
+            if task.status == "archived":
+                return {"error": f"archived task 不能触发: {task_id}"}
+            if manual_trigger is None:
+                return {"error": "当前入口不支持手动触发 task"}
+            return manual_trigger(task_id)
         new_status = {
             "pause": "paused",
             "resume": "active",
@@ -336,7 +343,7 @@ def register(
     )
     kernel.tool(
         name="task_control",
-        description="控制 task 运行状态。仅支持 pause/resume/archive。不要用它修改任务定义；修改定义应重新走 task_plan + task_apply。automation task 控制会直接执行，不再请求用户确认。",
+        description="控制 task 运行状态。支持 pause/resume/archive/trigger。trigger 表示按当前定义立刻临时执行一次。不要用它修改任务定义；修改定义应重新走 task_plan + task_apply。automation task 控制会直接执行，不再请求用户确认。",
         parameters={
             "type": "object",
             "properties": {

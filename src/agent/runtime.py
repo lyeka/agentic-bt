@@ -189,6 +189,16 @@ def _build_market_adapter(config: AgentConfig) -> object:
     return composite
 
 
+def _build_automation_delivery_channels() -> dict[str, object]:
+    from agent.automation.delivery import TelegramDeliveryChannel, WebhookDeliveryChannel
+
+    channels: dict[str, object] = {"webhook": WebhookDeliveryChannel()}
+    token = os.getenv("TELEGRAM_BOT_TOKEN")
+    if token:
+        channels["telegram"] = TelegramDeliveryChannel(bot_token=token)
+    return channels
+
+
 def build_kernel_bundle(
     *,
     config: AgentConfig,
@@ -235,12 +245,50 @@ def build_kernel_bundle(
     web.register(kernel, search_adapter=search_adapter)
 
     automation_store = AutomationStore(workspace=workspace, state=state)
+
+    def _manual_trigger(task_id: str) -> dict[str, object]:
+        from agent.automation.executor import AutomationExecutor
+        from agent.automation.models import TriggerEvent, utc_now_iso
+
+        task = automation_store.load_task(task_id)
+        if task is None:
+            return {"error": f"未找到 task: {task_id}"}
+        requested_at = utc_now_iso()
+        event = TriggerEvent(
+            event_key=f"manual:{requested_at}",
+            task_id=task_id,
+            trigger_type="manual",
+            payload={
+                "requested_at": requested_at,
+                "requested_by": adapter_name,
+                "conversation_id": str(conversation_id),
+            },
+            triggered_at=requested_at,
+        )
+        executor = AutomationExecutor(
+            config=config,
+            store=automation_store,
+            delivery_channels=_build_automation_delivery_channels(),
+        )
+        run = executor.execute(task, event)
+        runtime = automation_store.load_runtime_state(task_id)
+        if run.status == "succeeded":
+            runtime.last_success_at = run.finished_at
+        automation_store.save_runtime_state(runtime)
+        return {
+            "status": "ok",
+            "task_id": task_id,
+            "action": "trigger",
+            "run": run.to_dict(),
+        }
+
     automation_tools.register(
         kernel,
         store=automation_store,
         adapter_name=adapter_name,
         conversation_id=conversation_id,
         default_timezone=config.automation_default_timezone,
+        manual_trigger=_manual_trigger,
     )
 
     # permissions

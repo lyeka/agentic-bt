@@ -108,6 +108,12 @@ AUTOMATION_GUIDE = """\
    - needs_clarification：向用户提出一个简短澄清问题，或说明当前 v1 限制
    - error：修正 task 参数后重新 task_plan
 10. 只有在 task_apply 返回 status='ok' 之后，才能告诉用户“任务已创建/已生效”。
+11. 如果用户要求“把某个现有任务现在立刻跑一次 / 临时触发一次”，使用 task_control：
+   {
+     "task_id": "...",
+     "action": "trigger"
+   }
+   这会按当前任务定义立即执行一次，不会修改原定时计划。
 </automation_tools>"""
 
 

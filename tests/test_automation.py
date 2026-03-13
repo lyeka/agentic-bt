@@ -347,6 +347,97 @@ def test_task_apply_and_control_do_not_require_confirm(tmp_path):
     }
 
 
+def test_task_control_can_trigger_once_via_manual_callback(tmp_path):
+    workspace = tmp_path / "workspace"
+    state = tmp_path / "state"
+    store = AutomationStore(workspace=workspace, state=state)
+    kernel = Kernel(api_key="test")
+    calls: list[str] = []
+
+    def _manual_trigger(task_id: str) -> dict[str, object]:
+        calls.append(task_id)
+        return {"status": "ok", "task_id": task_id, "action": "trigger"}
+
+    register_automation_tools(
+        kernel,
+        store=store,
+        adapter_name="telegram",
+        conversation_id="12345",
+        default_timezone="Asia/Shanghai",
+        manual_trigger=_manual_trigger,
+    )
+
+    draft = kernel._tools["task_plan"].handler(
+        {
+            "task": {
+                "name": "run-now",
+                "description": "manual once",
+                "trigger": {
+                    "type": "cron",
+                    "cron_expr": "0 9 * * *",
+                },
+                "reaction": {
+                    "executor": {"type": "main_agent"},
+                    "prompt_template": "Analyze today's watchlist.",
+                },
+            }
+        }
+    )
+    applied = kernel._tools["task_apply"].handler({"draft_id": draft["draft_id"]})
+
+    result = kernel._tools["task_control"].handler(
+        {"task_id": applied["task_id"], "action": "trigger"}
+    )
+
+    assert result == {"status": "ok", "task_id": applied["task_id"], "action": "trigger"}
+    assert calls == [applied["task_id"]]
+
+
+def test_task_control_trigger_rejects_archived_task(tmp_path):
+    workspace = tmp_path / "workspace"
+    state = tmp_path / "state"
+    store = AutomationStore(workspace=workspace, state=state)
+    kernel = Kernel(api_key="test")
+    register_automation_tools(
+        kernel,
+        store=store,
+        adapter_name="telegram",
+        conversation_id="12345",
+        default_timezone="Asia/Shanghai",
+        manual_trigger=lambda task_id: {"status": "ok", "task_id": task_id, "action": "trigger"},
+    )
+
+    now = utc_now_iso()
+    store.save_task(
+        parse_task_definition(
+            {
+                "id": "archived-task",
+                "name": "archived-task",
+                "description": "",
+                "status": "archived",
+                "trigger": {
+                    "type": "cron",
+                    "cron_expr": "0 9 * * *",
+                    "timezone": "Asia/Shanghai",
+                },
+                "reaction": {
+                    "executor": {"type": "main_agent"},
+                    "prompt_template": "Analyze today's watchlist.",
+                },
+                "delivery": {},
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+    )
+
+    result = kernel._tools["task_control"].handler(
+        {"task_id": "archived-task", "action": "trigger"}
+    )
+
+    assert "archived task" in result["error"]
+
+
 def test_task_apply_missing_draft_returns_guidance(tmp_path):
     store = AutomationStore(workspace=tmp_path / "workspace", state=tmp_path / "state")
     kernel = Kernel(api_key="test")

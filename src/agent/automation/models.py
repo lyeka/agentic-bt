@@ -18,7 +18,7 @@ DELIVERY_CHANNELS = {"telegram", "webhook", "none"}
 EXECUTOR_TYPES = {"main_agent", "skill", "subagent"}
 TOOL_PROFILES = {"analysis", "report_writer"}
 TRIGGER_TYPES = {"cron", "price_threshold"}
-CONTROL_ACTIONS = {"pause", "resume", "archive"}
+CONTROL_ACTIONS = {"pause", "resume", "archive", "trigger"}
 TASK_CONTEXT_VIEWS = {
     "all_tasks",
     "overview",
