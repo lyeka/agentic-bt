@@ -62,17 +62,24 @@ AUTOMATION_GUIDE = """\
 当你要创建自动化任务时，严格遵循以下规则：
 
 1. 先调用 task_plan，拿到 draft_id 之后，再调用 task_apply。不要直接调用 task_apply。
-2. task_plan 的 task 必须使用 canonical 字段：
+   task_plan 的结果有三种：
+   - 返回 draft_id：表示可以继续 task_apply
+   - 返回 status='needs_clarification'：表示现在不能 task_apply，必须先向用户澄清
+   - 返回 error：表示参数不合法，应修正后重新 task_plan
+   只有第一种情况才能调用 task_apply。
+2. 调用 task_apply 时，只能使用 task_plan 刚刚返回的原始 draft_id。
+   不要从任务名猜 draft_id，不要自己拼接 draft-xxx，不要把 task_id/name 当 draft_id。
+3. task_plan 的 task 必须使用 canonical 字段：
    - 顶层：name / description / trigger / reaction / delivery
    - 不要使用：schedule / steps / output / pipeline / action
-3. cron 任务的 trigger 写法固定为：
+4. cron 任务的 trigger 写法固定为：
    {
      "type": "cron",
      "cron_expr": "53 21 * * 0-4",
      "timezone": "Asia/Shanghai"
    }
    不要写 trigger.cron，不要写 schedule.at/days。
-4. 价格监控任务的 trigger 写法固定为：
+5. 价格监控任务的 trigger 写法固定为：
    {
      "type": "price_threshold",
      "symbol": "AAPL",
@@ -81,17 +88,26 @@ AUTOMATION_GUIDE = """\
      "threshold": 220,
      "poll_sec": 60
    }
-5. reaction 不是 step workflow。不要写一串 tools/steps。
+6. reaction 不是 step workflow。不要写一串 tools/steps。
    只写：
    - executor.type: main_agent / skill / subagent
    - executor.name: 仅 skill/subagent 需要
    - prompt_template: 触发后要 agent 做什么
    如果触发后需要 market_ohlcv、compute、research 等能力，让 reaction 里的 agent 自己决定调用。
-6. delivery 只描述投递，不描述分析流程。
-7. 如果 task_plan 报字段错误，优先检查：
+7. delivery 只描述投递，不描述分析流程。
+   如果当前是在 Telegram 会话里，并且任务要推送到当前聊天：
+   - 可以完全省略 delivery
+   - 或只写 channel.type='telegram'
+   - 不要自己填写 telegram.target，系统会自动绑定当前 chat_id
+8. 如果 task_plan 报字段错误，优先检查：
    - 是否误写了 schedule 而不是 trigger
    - 是否误写了 cron 而不是 cron_expr
    - 是否误写了 steps/output
+9. 如果 task_plan 返回 needs_clarification 或 error，不要改去调用 bash/read/task_context/market_ohlcv 来“补救创建任务”。
+   此时正确动作是：
+   - needs_clarification：向用户提出一个简短澄清问题，或说明当前 v1 限制
+   - error：修正 task 参数后重新 task_plan
+10. 只有在 task_apply 返回 status='ok' 之后，才能告诉用户“任务已创建/已生效”。
 </automation_tools>"""
 
 

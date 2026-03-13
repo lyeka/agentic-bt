@@ -87,7 +87,14 @@ def register(
             return {"error": "缺少参数: draft_id"}
         draft = store.load_draft(draft_id)
         if draft is None:
-            return {"error": f"未找到 draft: {draft_id}"}
+            return {
+                "error": f"未找到 draft: {draft_id}",
+                "hints": [
+                    "只能传入 task_plan 刚返回的原始 draft_id。",
+                    "如果 task_plan 返回的是 status='needs_clarification'，应先向用户澄清，不能直接 task_apply。",
+                    "不要从任务名、task_id 或 preview 文本猜测 draft_id。",
+                ],
+            }
         store.save_task(draft.task)
         runtime = store.load_runtime_state(draft.task.id)
         runtime.status = draft.task.status
@@ -104,6 +111,22 @@ def register(
         view = str(args.get("view") or "overview").strip() or "overview"
         if view not in TASK_CONTEXT_VIEWS:
             return {"error": f"view 必须是 {sorted(TASK_CONTEXT_VIEWS)}"}
+        if view == "all_tasks":
+            items = []
+            for task in store.list_tasks():
+                state = store.load_runtime_state(task.id)
+                latest = store.latest_run(task.id)
+                items.append({
+                    "task_id": task.id,
+                    "name": task.name,
+                    "description": task.description,
+                    "status": task.status,
+                    "trigger": task.to_dict()["trigger"],
+                    "next_fire_at": state.next_fire_at,
+                    "last_success_at": state.last_success_at,
+                    "latest_run_status": latest.status if latest else None,
+                })
+            return {"tasks": items}
         selector = _select_context(kernel, args)
         if selector.get("run_id"):
             task_id = selector.get("task_id")
@@ -171,12 +194,18 @@ def register(
         name="task_plan",
         description=(
             "创建或修改自动化任务草案。仅做校验/预览，不直接生效。"
+            "返回结果分三种："
+            "1) 有 draft_id：表示可继续 task_apply；"
+            "2) status='needs_clarification'：表示必须先向用户澄清，不能 task_apply；"
+            "3) error：表示参数不合法，应修正后重新 task_plan。"
             "task 必须使用 canonical 结构：顶层字段是 name/description/trigger/reaction/delivery。"
             "不要使用 schedule、steps、output、pipeline、action。"
             "cron 任务必须写 trigger.type='cron'、trigger.cron_expr、trigger.timezone。"
             "价格监控任务必须写 trigger.type='price_threshold'、symbol、interval、condition、threshold、poll_sec。"
             "reaction 只描述一次执行：executor + prompt_template；不要把 reaction 写成 tools/steps 工作流。"
             "如果想让触发后去获取行情、计算、研究，请把目标写进 reaction.prompt_template，让 agent 在运行时自己调用现有工具。"
+            "如果当前是在 Telegram 会话里创建任务，且要推送到当前聊天，不要手动填写 telegram 的 target；系统会自动绑定当前 chat_id。"
+            "如果返回 needs_clarification 或 error，不要改去调用 task_apply、task_context、bash、market_ohlcv 来补救创建流程。"
         ),
         parameters={
             "type": "object",
@@ -254,7 +283,11 @@ def register(
                         },
                         "delivery": {
                             "type": "object",
-                            "description": "投递配置。只描述 pre_alert/final_result/on_failure 和 channels。",
+                            "description": (
+                                "投递配置。只描述 pre_alert/final_result/on_failure 和 channels。"
+                                "在 Telegram 会话里，如要推送到当前聊天，只需把 channel.type 写成 telegram，"
+                                "或直接省略 target；系统会自动补当前 chat_id。"
+                            ),
                         },
                     },
                     "required": ["name", "trigger", "reaction"],
@@ -266,7 +299,12 @@ def register(
     )
     kernel.tool(
         name="task_apply",
-        description="应用 task_plan 生成的 draft。先 task_plan，再把返回的 draft_id 传给 task_apply。automation task 会直接生效，不再请求用户确认。",
+        description=(
+            "应用 task_plan 生成的 draft。先 task_plan，再把返回的原始 draft_id 传给 task_apply。"
+            "只有 task_plan 返回了 draft_id 时才能调用。"
+            "不要从任务名、task_id、preview 文本中猜测 draft_id。"
+            "automation task 会直接生效，不再请求用户确认。"
+        ),
         parameters={
             "type": "object",
             "properties": {
@@ -278,7 +316,7 @@ def register(
     )
     kernel.tool(
         name="task_context",
-        description="查询自动化 task/run 的上下文。若当前消息是 reply 某次自动推送，可省略 selector 直接查询绑定的 run/task。不要把它当成创建任务工具。",
+        description="查询自动化 task/run 的上下文。view='all_tasks' 可列出当前全部任务。若当前消息是 reply 某次自动推送，可省略 selector 直接查询绑定的 run/task。不要把它当成创建任务工具。",
         parameters={
             "type": "object",
             "properties": {
@@ -320,17 +358,118 @@ def _task_id(raw_id: Any, raw_name: Any) -> str:
     return out or f"task-{uuid.uuid4().hex[:8]}"
 
 
-def _default_delivery(raw_delivery: Any, adapter_name: str, conversation_id: str) -> dict[str, Any]:
-    if raw_delivery:
-        return dict(raw_delivery)
+def _default_channels(adapter_name: str, conversation_id: str) -> list[dict[str, Any]]:
     if adapter_name == "telegram":
-        channels = [{"type": "telegram", "target": conversation_id}]
-    else:
-        channels = [{"type": "none", "target": ""}]
+        return [{"type": "telegram", "target": conversation_id}]
+    return [{"type": "none", "target": ""}]
+
+
+def _copy_channels(channels: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [dict(item) for item in channels]
+
+
+def _default_delivery(adapter_name: str, conversation_id: str) -> dict[str, Any]:
+    channels = _default_channels(adapter_name, conversation_id)
     return {
-        "pre_alert": {"enabled": False, "channels": channels},
-        "final_result": {"enabled": True, "channels": channels},
-        "on_failure": {"enabled": True, "channels": channels},
+        "pre_alert": {"enabled": False, "channels": _copy_channels(channels)},
+        "final_result": {"enabled": True, "channels": _copy_channels(channels)},
+        "on_failure": {"enabled": True, "channels": _copy_channels(channels)},
+    }
+
+
+def _normalize_delivery_channel(
+    raw_channel: Any,
+    *,
+    adapter_name: str,
+    conversation_id: str,
+) -> dict[str, Any]:
+    if isinstance(raw_channel, str):
+        channel_type = raw_channel.strip() or "none"
+        target = conversation_id if channel_type == "telegram" and adapter_name == "telegram" else ""
+        if channel_type == "none":
+            target = ""
+        return {"type": channel_type, "target": target}
+    if not isinstance(raw_channel, dict):
+        return dict(raw_channel)
+    channel = dict(raw_channel)
+    channel_type = str(channel.get("type") or "none").strip() or "none"
+    target = str(channel.get("target") or "").strip()
+    if channel_type == "telegram" and not target and adapter_name == "telegram":
+        target = conversation_id
+    if channel_type == "none":
+        target = ""
+    return {"type": channel_type, "target": target}
+
+
+def _normalize_delivery_phase(
+    raw_phase: Any,
+    *,
+    default_phase: dict[str, Any],
+    adapter_name: str,
+    conversation_id: str,
+) -> dict[str, Any]:
+    if raw_phase is None:
+        return {
+            "enabled": bool(default_phase.get("enabled", False)),
+            "channels": _copy_channels(list(default_phase.get("channels") or [])),
+        }
+    if isinstance(raw_phase, bool):
+        return {
+            "enabled": raw_phase,
+            "channels": _copy_channels(list(default_phase.get("channels") or [])) if raw_phase else [],
+        }
+    if not isinstance(raw_phase, dict):
+        return dict(raw_phase)
+    phase = dict(raw_phase)
+    enabled = bool(phase.get("enabled", default_phase.get("enabled", False)))
+    raw_channels = phase.get("channels")
+    if raw_channels is None:
+        channels = _copy_channels(list(default_phase.get("channels") or [])) if enabled else []
+    else:
+        channels = [
+            _normalize_delivery_channel(
+                item,
+                adapter_name=adapter_name,
+                conversation_id=conversation_id,
+            )
+            for item in list(raw_channels)
+        ]
+        if enabled and not channels:
+            channels = _copy_channels(list(default_phase.get("channels") or []))
+    return {"enabled": enabled, "channels": channels}
+
+
+def _normalize_delivery(
+    raw_delivery: Any,
+    *,
+    adapter_name: str,
+    conversation_id: str,
+) -> dict[str, Any]:
+    default = _default_delivery(adapter_name, conversation_id)
+    if raw_delivery in (None, {}):
+        return default
+    if not isinstance(raw_delivery, dict):
+        return dict(raw_delivery)
+    delivery = dict(raw_delivery)
+    return {
+        "pre_alert": _normalize_delivery_phase(
+            delivery.get("pre_alert"),
+            default_phase=default["pre_alert"],
+            adapter_name=adapter_name,
+            conversation_id=conversation_id,
+        ),
+        "final_result": _normalize_delivery_phase(
+            delivery.get("final_result"),
+            default_phase=default["final_result"],
+            adapter_name=adapter_name,
+            conversation_id=conversation_id,
+        ),
+        "on_failure": _normalize_delivery_phase(
+            delivery.get("on_failure"),
+            default_phase=default["on_failure"],
+            adapter_name=adapter_name,
+            conversation_id=conversation_id,
+        ),
     }
 
 
@@ -344,7 +483,11 @@ def _apply_defaults(
     trigger = raw_task.get("trigger")
     if isinstance(trigger, dict) and str(trigger.get("type", "")).strip() == "cron":
         trigger.setdefault("timezone", default_timezone)
-    raw_task.setdefault("delivery", _default_delivery(raw_task.get("delivery"), adapter_name, conversation_id))
+    raw_task["delivery"] = _normalize_delivery(
+        raw_task.get("delivery"),
+        adapter_name=adapter_name,
+        conversation_id=conversation_id,
+    )
 
 
 def _plan_warnings(task: TaskDefinition) -> list[str]:
@@ -400,7 +543,7 @@ def _task_plan_error(
             "tool_profile": "analysis",
             "budget": {"max_rounds": 8, "timeout_sec": 120},
         },
-        "delivery": _default_delivery(None, adapter_name, conversation_id),
+        "delivery": _default_delivery(adapter_name, conversation_id),
     }
     return {
         "error": error,

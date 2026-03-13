@@ -178,6 +178,132 @@ def test_task_plan_apply_and_context_default_selector(tmp_path):
     assert overview["task"]["id"] == task_id
 
 
+def test_task_context_can_list_all_tasks(tmp_path):
+    workspace = tmp_path / "workspace"
+    state = tmp_path / "state"
+    store = AutomationStore(workspace=workspace, state=state)
+    kernel = Kernel(api_key="test")
+    register_automation_tools(
+        kernel,
+        store=store,
+        adapter_name="telegram",
+        conversation_id="12345",
+        default_timezone="Asia/Shanghai",
+    )
+
+    now = utc_now_iso()
+    for idx in (1, 2):
+        task = parse_task_definition(
+            {
+                "id": f"task-{idx}",
+                "name": f"Task {idx}",
+                "description": f"demo {idx}",
+                "status": "active",
+                "trigger": {
+                    "type": "cron",
+                    "cron_expr": f"{idx} 9 * * *",
+                    "timezone": "Asia/Shanghai",
+                },
+                "reaction": {
+                    "executor": {"type": "main_agent"},
+                    "prompt_template": "Analyze today's watchlist.",
+                },
+                "delivery": {},
+                "created_at": now,
+                "updated_at": now,
+            }
+        )
+        store.save_task(task)
+
+    result = kernel._tools["task_context"].handler({"view": "all_tasks"})
+
+    assert len(result["tasks"]) == 2
+    assert {item["task_id"] for item in result["tasks"]} == {"task-1", "task-2"}
+
+
+def test_task_plan_empty_delivery_defaults_to_current_telegram_chat(tmp_path):
+    store = AutomationStore(workspace=tmp_path / "workspace", state=tmp_path / "state")
+    kernel = Kernel(api_key="test")
+    register_automation_tools(
+        kernel,
+        store=store,
+        adapter_name="telegram",
+        conversation_id="12345",
+        default_timezone="Asia/Shanghai",
+    )
+
+    draft = kernel._tools["task_plan"].handler(
+        {
+            "task": {
+                "name": "tg-delivery-default",
+                "description": "push to current tg chat",
+                "trigger": {
+                    "type": "cron",
+                    "cron_expr": "0 9 * * *",
+                },
+                "reaction": {
+                    "executor": {"type": "main_agent"},
+                    "prompt_template": "Send me a market summary.",
+                },
+                "delivery": {},
+            }
+        }
+    )
+
+    assert draft["task"]["delivery"]["final_result"]["channels"] == [
+        {"type": "telegram", "target": "12345"}
+    ]
+    assert draft["task"]["delivery"]["on_failure"]["channels"] == [
+        {"type": "telegram", "target": "12345"}
+    ]
+
+
+def test_task_plan_fills_current_telegram_target_for_partial_delivery(tmp_path):
+    store = AutomationStore(workspace=tmp_path / "workspace", state=tmp_path / "state")
+    kernel = Kernel(api_key="test")
+    register_automation_tools(
+        kernel,
+        store=store,
+        adapter_name="telegram",
+        conversation_id="12345",
+        default_timezone="Asia/Shanghai",
+    )
+
+    draft = kernel._tools["task_plan"].handler(
+        {
+            "task": {
+                "name": "tg-delivery-partial",
+                "description": "push to current tg chat",
+                "trigger": {
+                    "type": "cron",
+                    "cron_expr": "0 9 * * *",
+                },
+                "reaction": {
+                    "executor": {"type": "main_agent"},
+                    "prompt_template": "Send me a market summary.",
+                },
+                "delivery": {
+                    "final_result": {
+                        "enabled": True,
+                        "channels": ["telegram"],
+                    },
+                    "on_failure": {
+                        "enabled": True,
+                        "channels": [{"type": "telegram"}],
+                    },
+                },
+            }
+        }
+    )
+
+    assert draft["task"]["delivery"]["final_result"]["channels"] == [
+        {"type": "telegram", "target": "12345"}
+    ]
+    assert draft["task"]["delivery"]["on_failure"]["channels"] == [
+        {"type": "telegram", "target": "12345"}
+    ]
+
+
 def test_task_apply_and_control_do_not_require_confirm(tmp_path):
     workspace = tmp_path / "workspace"
     state = tmp_path / "state"
@@ -219,6 +345,24 @@ def test_task_apply_and_control_do_not_require_confirm(tmp_path):
         "task_id": applied["task_id"],
         "new_status": "paused",
     }
+
+
+def test_task_apply_missing_draft_returns_guidance(tmp_path):
+    store = AutomationStore(workspace=tmp_path / "workspace", state=tmp_path / "state")
+    kernel = Kernel(api_key="test")
+    register_automation_tools(
+        kernel,
+        store=store,
+        adapter_name="telegram",
+        conversation_id="12345",
+        default_timezone="Asia/Shanghai",
+    )
+
+    result = kernel._tools["task_apply"].handler({"draft_id": "draft-does-not-exist"})
+
+    assert "未找到 draft" in result["error"]
+    assert any("原始 draft_id" in item for item in result["hints"])
+    assert any("needs_clarification" in item for item in result["hints"])
 
 
 def test_task_plan_needs_clarification_for_market_calendar_language(tmp_path):

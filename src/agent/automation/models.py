@@ -20,6 +20,7 @@ TOOL_PROFILES = {"analysis", "report_writer"}
 TRIGGER_TYPES = {"cron", "price_threshold"}
 CONTROL_ACTIONS = {"pause", "resume", "archive"}
 TASK_CONTEXT_VIEWS = {
+    "all_tasks",
     "overview",
     "status",
     "latest_run",
