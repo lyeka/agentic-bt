@@ -18,9 +18,9 @@ env/
 .coverage
 htmlcov/
 
-# AgenticBT 运行时产物
-/tmp/agenticbt/
-.agenticbt/
+# AthenaClaw 运行时产物
+/tmp/athenaclaw/
+.athenaclaw/
 
 # IDE
 .idea/

@@ -2,5 +2,9 @@
 import os
 import sys
 
-# 项目根目录加入 path，使 examples/ 可导入
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+ROOT = os.path.join(os.path.dirname(__file__), "..")
+SRC = os.path.join(ROOT, "src")
+
+# 显式注入仓库根目录和 src/，避免依赖外部 editable install。
+sys.path.insert(0, ROOT)
+sys.path.insert(0, SRC)

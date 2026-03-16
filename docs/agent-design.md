@@ -35,7 +35,7 @@ status: active
 - **可控性**：用户能看懂、能编辑、能撤销 agent 的灵魂、记忆与自动化
 - **可扩展性**：复杂能力主要通过 skills 迭代，不需要持续改内核
 - **成长性**：长期使用后，agent 在研究深度、判断准确性、用户理解上有可观测的进步
-- **安全性**：默认不越权；灵魂和核心信念的修改需用户确认
+- **安全性**：默认不越权；灵魂修改受 prompt 边界约束，自动化和外部高风险操作仍默认收紧
 
 ---
 
@@ -181,9 +181,9 @@ read/write/edit 的覆盖范围：
 |---------|---------|---------|
 | memory.md | agent 自由修改（FREE） | 无（容量+压缩是质量门） |
 | notebook/** | agent 自由写入（FREE） | 无（外化产物） |
-| soul.md | 需用户确认（USER_CONFIRM） | 是（改变人格需教练同意） |
+| soul.md | agent 自由修改（FREE） | 无（通过 prompt 边界约束成长方向） |
 
-这个层级反映人类自我修改的自然规律：你随时可以记录新观察（memory.md），但你的核心价值观（soul.md）轻易不变——除非教练明确指导。
+这个层级反映人类自我修改的自然规律：你随时可以记录新观察（memory.md），也可以在教练反馈下逐步调整自己的工作原则（soul.md），但这种成长仍应受 prompt 边界约束，而不是任意漂移。
 
 #### 用户作为教练
 
@@ -196,7 +196,7 @@ read/write/edit 的覆盖范围：
 
 "以后分析前先看大盘趋势"
   → 可能固化为 skill 的步骤调整
-  → 或更新 soul.md 的"我的风格"（需用户确认）
+  → 或更新 soul.md 的"我的风格"（直接内化到长期原则）
 
 "这次分析得好，保持这个深度"
   → edit("memory.md", ...) → 记录正反馈
@@ -273,7 +273,7 @@ kernel.wire("write:memory.md",  _on_memory_write)   # 超限自动压缩
 kernel.wire("edit:memory.md",   _on_memory_write)
 
 # 文件权限（声明式）
-kernel.permission("soul.md",     Permission.USER_CONFIRM)
+kernel.permission("soul.md",     Permission.FREE)
 kernel.permission("memory.md",   Permission.FREE)
 kernel.permission("notebook/**", Permission.FREE)
 ```
@@ -294,7 +294,7 @@ input → Kernel.turn(input, session)
          │      │    → wire("write:memory.md") → 超限检查 → 自动压缩
          │      │
          │      ├─ tool_call("edit", path="soul.md", ...)
-         │      │    → permission(path) → USER_CONFIRM → 等待确认
+         │      │    → permission(path) → FREE → 执行
          │      │    → wire("edit:soul.md") → _assemble_system_prompt()
          │      │
          │      └─ repeat until finish_reason == "stop"
@@ -377,9 +377,9 @@ Soul 不只决定输出语气，而是决定**分析路径**：
 量化分析 soul → 先用 compute 算多因子得分，再看统计显著性
 ```
 
-Soul 内含核心信念——对市场的根本性判断、投资哲学、行为边界。这些信念是 soul 的一部分，而不是单独的文件。具体的日常观察和分析结论写入 memory.md。
+Soul 内含核心信念——对市场的根本性判断、投资哲学、行为边界，以及被长期反馈逐步内化的工作原则。这些信念是 soul 的一部分，而不是单独的文件。具体的日常观察、用户档案和分析结论写入 memory.md。
 
-修改规则：Soul 轻易不变。修改需用户（教练）确认。修改 soul.md 后，system prompt 实时刷新（通过 `wire("edit:soul.md")` 触发 `_assemble_system_prompt()`）。
+修改规则：Soul 仍然应保持稳定，但允许在教练反馈下主动成长。修改 soul.md 后，system prompt 实时刷新（通过 `wire("edit:soul.md")` 触发 `_assemble_system_prompt()`）。
 
 system prompt = soul.md 内容 + WORKSPACE_GUIDE（固定元认知框架）。Memory 内容不以任何形式进入 system prompt——没有摘要，没有索引，没有片段。
 
@@ -593,7 +593,7 @@ notebook/                        ← 笔记本（外化产物）
 
 | 区域 | 性质 | 修改频率 | 修改权限 |
 |------|------|---------|---------|
-| soul.md | 人格身份与核心信念 | 极少变 | USER_CONFIRM（变更实时刷新 system prompt） |
+| soul.md | 人格身份与核心信念 | 渐进演化 | FREE（变更实时刷新 system prompt） |
 | memory.md | 内化记忆（agent 自组织） | 渐进积累 | FREE（容量+压缩为质量门） |
 | notebook/ | 外化产物 | 自由写入 | FREE |
 
@@ -654,8 +654,8 @@ Agent 自动编排：
 
 Agent 行为：
   1. edit("memory.md", ...) → 记录教练反馈（写在顶部，newest-first）
-  2. 提议修改 soul.md → 增加"重视市场情绪和资金面"到分析原则 → 等待用户确认
-  3. 用户确认后 → soul.md 更新 → system prompt 实时刷新 → 后续分析自动包含资金面评估
+  2. edit("soul.md", ...) → 增加"重视市场情绪和资金面"到分析原则
+  3. soul.md 更新 → system prompt 实时刷新 → 后续分析自动包含资金面评估
 ```
 
 ### 旅程 C：定时复盘（先设计后确认）
@@ -751,7 +751,7 @@ Agent 输出任务设计稿：
 
 | 功能 | 状态 | 说明 |
 |------|------|------|
-| soul.md → USER_CONFIRM | ✅ | |
+| soul.md → FREE | ✅ | 通过 prompt 边界约束成长方向 |
 | notebook/** → FREE | ✅ | |
 | memory.md → FREE | ✅ | 容量+压缩是质量门，无需权限摩擦 |
 
@@ -768,7 +768,7 @@ Agent 输出任务设计稿：
 ## 九、安全与合规
 
 1. **IM 输入默认不可信**：必须有 prompt injection 防护与规则优先级
-2. **灵魂修改强确认**：soul.md 的修改需用户确认；确认后 system prompt 实时刷新
+2. **灵魂修改受 prompt 边界约束**：soul.md 可主动成长；写后 system prompt 实时刷新
 3. **记忆自由写入**：memory.md 无权限摩擦，容量上限 + 自动压缩是质量门
 4. **权限最小化**：skills 声明 allowed-tools；未声明不得调用高风险工具
 5. **审计与可追溯**：任务触发、工具调用、关键决策、灵魂变更、记忆压缩都产生事件日志
