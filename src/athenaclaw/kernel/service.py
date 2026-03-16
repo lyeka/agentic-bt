@@ -683,6 +683,7 @@ class Kernel:
 
         chunks = self.client.chat.completions.create(**kwargs)
         parts: list[str] = []
+        reasoning_parts: list[str] = []
         tc_acc: dict[int, dict] = {}
         finish_reason = "stop"
 
@@ -695,6 +696,13 @@ class Kernel:
             if getattr(delta, "content", None):
                 parts.append(delta.content)
                 self.emit("llm.chunk", {"content": delta.content, "round": round_num})
+            reasoning_piece = getattr(delta, "reasoning_content", None)
+            if reasoning_piece is None:
+                model_extra = getattr(delta, "model_extra", None)
+                if isinstance(model_extra, dict):
+                    reasoning_piece = model_extra.get("reasoning_content")
+            if reasoning_piece:
+                reasoning_parts.append(str(reasoning_piece))
             if getattr(delta, "tool_calls", None):
                 for tc in delta.tool_calls:
                     idx = tc.index
@@ -716,6 +724,12 @@ class Kernel:
                 "function": {"name": v["name"], "arguments": v["arguments"]},
             })
             tool_calls.append(LLMToolCall(id=v["id"], name=v["name"], arguments=v["arguments"]))
+        if reasoning_parts:
+            msg["reasoning_content"] = "".join(reasoning_parts)
+        elif tool_calls:
+            # Keep streamed tool-call messages compatible with providers that
+            # require reasoning_content when thinking is enabled.
+            msg["reasoning_content"] = ""
 
         return LLMResult(
             assistant_message=msg,

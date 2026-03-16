@@ -132,6 +132,11 @@ class OpenAIChatProvider:
                 }
                 if normalized.get("reasoning_content") is not None:
                     payload["reasoning_content"] = normalized["reasoning_content"]
+                elif normalized.get("tool_calls"):
+                    # Some thinking-enabled providers require every assistant
+                    # tool-call message to include reasoning_content, even for
+                    # old sessions created before we preserved it.
+                    payload["reasoning_content"] = ""
                 if normalized.get("tool_calls"):
                     payload["tool_calls"] = normalized["tool_calls"]
                 compiled.append(payload)

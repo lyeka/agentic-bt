@@ -157,6 +157,64 @@ def test_kernel_emits_llm_call_error_on_provider_exception():
     assert "provider 400" in seen[0]["error"]
 
 
+def test_stream_complete_preserves_reasoning_content_on_tool_call():
+    kernel = Kernel()
+
+    class _FakeStreamClient:
+        def __init__(self) -> None:
+            self.chat = self
+            self.completions = self
+
+        def create(self, **_kwargs):
+            return [
+                SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            finish_reason=None,
+                            delta=SimpleNamespace(
+                                content=None,
+                                reasoning_content="先看持仓",
+                                tool_calls=None,
+                            ),
+                        )
+                    ]
+                ),
+                SimpleNamespace(
+                    choices=[
+                        SimpleNamespace(
+                            finish_reason="tool_calls",
+                            delta=SimpleNamespace(
+                                content=None,
+                                tool_calls=[
+                                    SimpleNamespace(
+                                        index=0,
+                                        id="tc1",
+                                        function=SimpleNamespace(
+                                            name="portfolio",
+                                            arguments='{"action":"get"}',
+                                        ),
+                                    )
+                                ],
+                            ),
+                        )
+                    ]
+                ),
+            ]
+
+    kernel.client = _FakeStreamClient()
+
+    result = kernel._stream_complete(
+        model=kernel.model,
+        messages=[{"role": "user", "content": "查看持仓"}],
+        tools=None,
+        round_num=1,
+    )
+
+    assert result.finish_reason == "tool_calls"
+    assert result.assistant_message["reasoning_content"] == "先看持仓"
+    assert result.assistant_message["tool_calls"][0]["function"]["name"] == "portfolio"
+
+
 @given("一个注册了 echo 工具的 Kernel", target_fixture="kctx")
 def given_kernel_with_echo(kctx):
     kernel = Kernel()

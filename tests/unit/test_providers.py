@@ -92,3 +92,28 @@ def test_openai_provider_preserves_reasoning_content_on_assistant_tool_call():
     assert compiled[0]["role"] == "assistant"
     assert compiled[0]["reasoning_content"] == "先读 memory"
     assert compiled[0]["tool_calls"][0]["function"]["name"] == "read"
+
+
+def test_openai_provider_backfills_empty_reasoning_content_for_tool_calls():
+    provider = OpenAIChatProvider(client=MagicMock())
+
+    compiled = provider.compile_messages([
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "tc1",
+                    "type": "function",
+                    "function": {
+                        "name": "portfolio",
+                        "arguments": "{\"action\":\"get\"}",
+                    },
+                }
+            ],
+        }
+    ])
+
+    assert compiled[0]["role"] == "assistant"
+    assert compiled[0]["reasoning_content"] == ""
+    assert compiled[0]["tool_calls"][0]["function"]["name"] == "portfolio"
