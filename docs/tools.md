@@ -5,11 +5,12 @@
 
 ## 工具总览
 
-当前 Kernel 内置 7 个工具：
+当前 Kernel 内置这些工具：
 
 | 工具 | 作用 |
 |------|------|
 | `market_ohlcv` | 获取 OHLCV，写入 DataStore，供 `compute` 消费 |
+| `portfolio` | 维护结构化当前持仓快照 `portfolio.json` |
 | `compute` | 在沙箱中对已加载 OHLCV 做 Python 分析 |
 | `read` | 读工作区文件 |
 | `write` | 写工作区文件 |
@@ -17,7 +18,41 @@
 | `bash` | 执行 shell 命令（按权限控制） |
 | `web_search` / `web_fetch` | 可选 Web 搜索与抓取 |
 
-其中最容易用错的是 `market_ohlcv` 和 `compute`。
+其中最容易用错的是 `portfolio`、`market_ohlcv` 和 `compute`。
+
+## portfolio
+
+### 核心语义
+
+`portfolio` 维护的是**当前持仓快照**，不是交易流水，不是券商账本。
+
+适合的输入：
+
+- 用户发完整持仓截图
+- 用户直接给出某账户当前持仓
+- 用户明确说某笔已执行交易后，当前仓位已经变了
+
+不适合的输入：
+
+- 计划、假设、watchlist
+- 不完整截图
+- 账户或 symbol 识别不清的内容
+
+### action
+
+- `get`: 读取全部账户或某个账户的当前快照
+- `upsert`: 更新账户快照
+- `delete_account`: 删除误建账户
+
+`upsert` 的关键参数是 `positions_mode`：
+
+- `replace`: 本次给出的 `positions` 就是账户最新完整持仓
+- `merge`: 只更新提到的 symbol，未提到的不动；`quantity=0` 表示删除该持仓
+
+### 为什么不用 memory.md
+
+`memory.md` 适合长期偏好、风险边界、关注方向。
+详细持仓需要结构化读取和 UI 展示，因此单独维护在 `portfolio.json`。
 
 ## market_ohlcv
 

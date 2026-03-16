@@ -125,6 +125,8 @@ def test_workspace_guide_emphasizes_growth_and_investment_memory():
     assert "持仓、成本、仓位、关注方向、风险偏好、投资目标" in WORKSPACE_GUIDE
     assert "记住 / 以后注意 / 重要提醒" in WORKSPACE_GUIDE
     assert "口头说“我记住了”，但没有落盘" in WORKSPACE_GUIDE
+    assert "portfolio.json" in WORKSPACE_GUIDE
+    assert "详细当前持仓进 portfolio.json" in WORKSPACE_GUIDE
 
 
 def test_seed_prompt_bootstraps_on_first_durable_signal():
@@ -135,6 +137,8 @@ def test_seed_prompt_bootstraps_on_first_durable_signal():
     assert "不要为了建档而建档" in SEED_PROMPT
     assert "记住" in SEED_PROMPT and "重要提醒" in SEED_PROMPT
     assert "include_data_in_result" in SEED_PROMPT
+    assert "portfolio" in SEED_PROMPT
+    assert "不要把详细持仓继续写进 memory.md" in SEED_PROMPT
 
 
 def test_kernel_emits_llm_call_error_on_provider_exception():

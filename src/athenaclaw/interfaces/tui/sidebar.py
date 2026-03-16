@@ -7,6 +7,8 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
 from pathlib import Path
 
 from textual.app import ComposeResult
@@ -46,6 +48,8 @@ class SidebarPanel(Vertical):
         )
 
     def refresh_portfolio(self, text: str) -> None:
+        if not text:
+            text = self._portfolio_preview()
         self.query_one("#sb-portfolio", Static).update(text or "暂无持仓数据")
 
     def refresh_market(self, text: str) -> None:
@@ -60,3 +64,64 @@ class SidebarPanel(Vertical):
             return f"[{label}] (空)"
         preview = "\n".join(text.splitlines()[:lines])
         return f"── {label} ──\n{preview}"
+
+    def _portfolio_preview(self) -> str:
+        path = self.workspace / "portfolio.json"
+        if not path.exists():
+            return "暂无持仓数据"
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError:
+            return "portfolio.json 格式错误"
+
+        accounts = data.get("accounts")
+        if not isinstance(accounts, list) or not accounts:
+            return "暂无持仓数据"
+
+        total_positions = sum(
+            len(a.get("positions", []))
+            for a in accounts
+            if isinstance(a.get("positions"), list)
+        )
+        lines = [f"{len(accounts)} 账户 / {total_positions} 标的"]
+        for account in accounts[:3]:
+            broker = str(account.get("broker", "")).strip() or "unknown"
+            label = str(account.get("label", "")).strip() or "default"
+            positions = account.get("positions")
+            items = positions if isinstance(positions, list) else []
+            count = len(items)
+            lines.append("")
+            lines.append(f"{broker} / {label}")
+            lines.append(f"{count} 标的 / 更新 {self._format_as_of(account.get('as_of'))}")
+            for position in items[:5]:
+                symbol = str(position.get("symbol", "")).strip() or "?"
+                quantity = self._format_quantity(position.get("quantity"))
+                lines.append(f"{symbol:<12}{quantity:>10}")
+            if count > 5:
+                lines.append(f"... 其余 {count - 5} 个标的")
+        if len(accounts) > 3:
+            lines.extend(["", f"... 其余 {len(accounts) - 3} 个账户"])
+        return "\n".join(lines)
+
+    @staticmethod
+    def _format_quantity(value: object) -> str:
+        if isinstance(value, int):
+            return f"{value:,}"
+        if isinstance(value, float):
+            if value.is_integer():
+                return f"{int(value):,}"
+            text = f"{value:,.4f}".rstrip("0").rstrip(".")
+            return text
+        return str(value or "?")
+
+    @staticmethod
+    def _format_as_of(value: object) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return "-"
+        candidate = text.replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(candidate)
+        except ValueError:
+            return text
+        return dt.strftime("%Y-%m-%d %H:%M")

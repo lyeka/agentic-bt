@@ -25,7 +25,7 @@ status: active
 ### 非目标（防止内核膨胀）
 
 - 不做交易系统（不自动下单、不管理订单状态机、不做风控引擎）
-- 不在内核里做领域专用数据结构（持仓表/投资账本由 skill 在 notebook 中管理）
+- 不做交易账本/订单状态机/风控引擎；当前持仓仅维护为轻量快照，不演化为完整券商系统
 - 不把特定数据源做成内核依赖（通过 Tool Provider 扩展）
 - 不把复杂多层编排树作为默认架构
 
@@ -122,13 +122,14 @@ Pi/bub/ampcode 的核心洞见：**read/write/edit/bash 是最小完备工具集
 - edit = 精准介入 + 缩短反馈链路
 - bash = 对接现有生态的桥梁
 
-映射到投资 Agent：**4 个通用原语 + 2 个领域工具 = 6 个工具**。
+映射到投资 Agent：**4 个通用原语 + 3 个领域工具 = 7 个工具**。
 
 | 工具 | 类型 | 仿生 | 说明 |
 |------|------|------|------|
 | `read(path)` | 通用原语 | 看 | 读 workspace 任意文件 |
 | `write(path, content)` | 通用原语 | 写 | 写 workspace 任意文件 |
 | `edit(path, old, new)` | 通用原语 | 精准修改 | diff-based 修改 |
+| `portfolio(action, ...)` | 领域增强 | 持仓快照 | 维护结构化当前持仓，不记录交易历史 |
 | `compute(code)` | 领域增强 | 计算器 | 沙箱化 Python（安全版 bash） |
 | `market_ohlcv(symbol, interval, mode)` | 领域核心 | 眼睛 | 内核数据原语，支持日线/分钟/history/latest |
 | `recall(query)` | 领域增强 | 回忆 | 全文搜索 memory + notebook |
@@ -138,6 +139,8 @@ Pi/bub/ampcode 的核心洞见：**read/write/edit/bash 是最小完备工具集
 notebook.write 就是 `write("notebook/xxx.md", content)`。
 memory.write 就是 `write("memory.md", content)`，read 就是 `read("memory.md")`。
 不需要单独的工具。
+
+但当前持仓是例外：它需要既能被 Agent 稳定读取，又能被 UI 直接消费，因此用 `portfolio` 维护 `portfolio.json` 这个轻量真相源，而不是继续把详细持仓散写在 memory.md 里。
 
 read/write/edit 的覆盖范围：
 - 写研究报告 → `write("notebook/research/宁德时代/2024-01-15.md", content)`

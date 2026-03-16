@@ -12,7 +12,7 @@ from pytest_bdd import given, parsers, scenario, then, when
 
 from athenaclaw.integrations.market.csv import CsvAdapter
 from athenaclaw.kernel import Kernel, Permission, Session
-from athenaclaw.tools import compute, edit, market, read, write
+from athenaclaw.tools import compute, edit, market, portfolio, read, write
 
 
 FEATURE = "features/kernel_tools.feature"
@@ -165,6 +165,112 @@ def test_market_schema_explains_compute_handoff():
     assert "不会以 data 变量自动注入 compute" in desc
     assert "不影响 fetch/DataStore/compute" in desc
     assert "include_data_in_result" in params
+
+
+def test_portfolio_schema_explains_snapshot_usage(tmp_path):
+    kernel = Kernel(api_key="test")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    portfolio.register(kernel, workspace)
+
+    desc = kernel._tools["portfolio"].schema["function"]["description"]
+    params = kernel._tools["portfolio"].schema["function"]["parameters"]["properties"]
+
+    assert "完整持仓截图" in desc
+    assert "何时不要用" in desc
+    assert "positions_mode=replace" in desc
+    assert "quantity=0 表示删除该持仓" in desc
+    assert "不要再写进 memory.md" in desc
+    assert "action" in params
+    assert "account" in params
+    assert "positions_mode" in params
+
+
+def test_portfolio_upsert_replace_and_get(tmp_path):
+    kernel = Kernel(api_key="test")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    portfolio.register(kernel, workspace)
+
+    result = kernel._tools["portfolio"].handler(
+        {
+            "action": "upsert",
+            "positions_mode": "replace",
+            "account": {
+                "broker": "futu",
+                "label": "default",
+                "as_of": "2026-03-16T14:32:00+08:00",
+                "cash_by_currency": {"HKD": 12000},
+                "positions": [
+                    {"symbol": "00700.HK", "name": "腾讯控股", "quantity": 100, "avg_cost": 320.5, "currency": "HKD"},
+                    {"symbol": "AAPL", "quantity": 20, "avg_cost": 173.2, "currency": "USD"},
+                ],
+            },
+        }
+    )
+
+    assert result["status"] == "ok"
+    assert result["created"] is True
+    assert result["account"]["account_id"] == "futu-default"
+    assert (workspace / "portfolio.json").exists()
+
+    fetched = kernel._tools["portfolio"].handler({"action": "get", "account_id": "futu-default"})
+    assert fetched["status"] == "ok"
+    assert fetched["account"]["broker"] == "futu"
+    assert len(fetched["account"]["positions"]) == 2
+    assert fetched["account"]["positions"][0]["symbol"] == "00700.HK"
+
+
+def test_portfolio_upsert_merge_and_delete(tmp_path):
+    kernel = Kernel(api_key="test")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    portfolio.register(kernel, workspace)
+
+    tool = kernel._tools["portfolio"].handler
+    tool(
+        {
+            "action": "upsert",
+            "account": {
+                "broker": "ibkr",
+                "label": "main",
+                "as_of": "2026-03-16T10:00:00Z",
+                "positions": [
+                    {"symbol": "AAPL", "quantity": 10, "avg_cost": 170, "currency": "USD"},
+                    {"symbol": "NVDA", "quantity": 5, "avg_cost": 100, "currency": "USD"},
+                ],
+            },
+        }
+    )
+
+    merged = tool(
+        {
+            "action": "upsert",
+            "account_id": "ibkr-main",
+            "positions_mode": "merge",
+            "account": {
+                "account_id": "ibkr-main",
+                "broker": "ibkr",
+                "label": "main",
+                "as_of": "2026-03-16T11:00:00Z",
+                "positions": [
+                    {"symbol": "AAPL", "quantity": 12, "avg_cost": 171, "currency": "USD"},
+                    {"symbol": "NVDA", "quantity": 0},
+                ],
+            },
+        }
+    )
+
+    assert merged["status"] == "ok"
+    assert len(merged["account"]["positions"]) == 1
+    assert merged["account"]["positions"][0]["symbol"] == "AAPL"
+    assert merged["account"]["positions"][0]["quantity"] == 12
+
+    deleted = tool({"action": "delete_account", "broker": "ibkr", "label": "main"})
+    assert deleted["status"] == "ok"
+
+    fetched = tool({"action": "get"})
+    assert fetched["accounts"] == []
 
 
 @given("一个带市场工具的 Kernel（记录 fetch 参数）", target_fixture="ktctx")

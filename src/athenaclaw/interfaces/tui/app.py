@@ -179,6 +179,7 @@ class InvestmentApp(App):
         k.wire("turn.done", self._on_kernel_event)
         k.wire("tool:write", self._on_workspace_change)
         k.wire("tool:edit", self._on_workspace_change)
+        k.wire("tool:portfolio", self._on_workspace_change)
 
     def _on_kernel_event(self, event: str, data: object) -> None:
         self.call_from_thread(self._update_progress, event, data)
@@ -263,6 +264,7 @@ class InvestmentApp(App):
     def _refresh_sidebar(self) -> None:
         sidebar = self.query_one("#sidebar", SidebarPanel)
         sidebar.refresh_profile(self.bundle.kernel.model, self.session.history)
+        sidebar.refresh_portfolio("")
 
     def _on_workspace_change(self, event: str, data: object) -> None:
         self.call_from_thread(self._refresh_sidebar)

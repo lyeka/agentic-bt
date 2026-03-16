@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import json
 import threading
 from collections import defaultdict
 from fnmatch import fnmatch
@@ -393,3 +394,43 @@ def when_kernel_raises(tuictx):
 @then("聊天区域包含错误提示")
 def then_chat_has_error(tuictx):
     assert tuictx["results"]["has_error"]
+
+
+def test_sidebar_reads_portfolio_snapshot(tmp_path):
+    tuictx = _make_ctx(tmp_path)
+    portfolio_path = tuictx["bundle"].workspace / "portfolio.json"
+    portfolio_path.write_text(
+        json.dumps(
+            {
+                "accounts": [
+                    {
+                        "account_id": "futu-default",
+                        "broker": "futu",
+                        "label": "default",
+                        "as_of": "2026-03-16T14:32:00+08:00",
+                        "cash_by_currency": {"HKD": 12000},
+                        "positions": [
+                            {"symbol": "00700.HK", "quantity": 100},
+                            {"symbol": "AAPL", "quantity": 20},
+                        ],
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    async def _run() -> str:
+        app = InvestmentApp(tuictx["bundle"], tuictx["session"])
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.pause()
+            widget = app.query_one("#sb-portfolio")
+            return str(widget.render())
+
+    text = asyncio.run(_run())
+    assert "1 账户 / 2 标的" in text
+    assert "futu / default" in text
+    assert "更新 2026-03-16 14:32" in text
+    assert "00700.HK" in text and "100" in text
+    assert "AAPL" in text and "20" in text

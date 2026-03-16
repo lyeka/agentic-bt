@@ -56,6 +56,7 @@ Feature: Kernel — 持久投资助手核心协调器
     Then system prompt 包含 "<workspace>"
     And system prompt 包含 "soul.md"
     And system prompt 包含 "memory.md"
+    And system prompt 包含 "portfolio.json"
     And system prompt 包含 "notebook/"
 
   Scenario: system prompt 不包含 memory 文件内容
