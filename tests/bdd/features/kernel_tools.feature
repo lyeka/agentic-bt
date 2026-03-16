@@ -12,6 +12,14 @@ Feature: Kernel 工具与工作区 — Phase 1b/1c 完整验证
     And DataStore 中存在 "ohlcv:TEST:1d:history"
     And DataStore 中存在 "ohlcv:TEST"
 
+  Scenario: market_ohlcv 可只入管道不回显 data
+    Given 一个带市场工具的 Kernel
+    When 调用 market_ohlcv symbol "TEST" interval "1d" mode "history" include_data_in_result "false"
+    Then 结果标记 data 未回显但 total_rows 保留
+    And DataStore 中存在 "ohlcv:TEST:1d:history"
+    When 调用 compute code "len(df)" symbol "TEST" interval "1d" mode "history"
+    Then 结果 result 等于 5
+
   Scenario: market_ohlcv 透传 interval/mode/start/end 参数
     Given 一个带市场工具的 Kernel（记录 fetch 参数）
     When 调用 market_ohlcv symbol "TEST" interval "1m" mode "history" start "2024-01-02 09:30:00" end "2024-01-02 10:30:00"

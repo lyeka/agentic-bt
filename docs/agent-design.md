@@ -400,6 +400,7 @@ market_ohlcv(
     mode: Literal["history", "latest"] = "history",
     start: str | None = None,
     end: str | None = None,
+    include_data_in_result: bool = True,
 )
 ```
 
@@ -412,7 +413,8 @@ market_ohlcv(
   - `1d/history` → 最近一年
   - 分钟 `history` → 当日盘中；休市时回退到最近一个交易日
 - `start/end` 只对 `history` 生效
-- 返回结果除 `data` 外还带 `source/as_of/effective_start/effective_end/warning`
+- `include_data_in_result=False` 时，OHLCV 仍会写入 DataStore，只是返回 `data=[]`
+- 返回结果除 `data` 外还带 `source/as_of/effective_start/effective_end/warning/data_in_result`
 
 ### 4.3 Calculator — 计算能力（compute）
 
@@ -441,7 +443,8 @@ latest(), prev(), crossover(), crossunder(), bbands(), macd()
 这个 agent：
   用户："帮我算宁德时代的 RSI"
   Agent：
-    1. market_ohlcv(symbol="300750.SZ", interval="1d", mode="history") → canonical OHLCV
+    1. market_ohlcv(symbol="300750.SZ", interval="1d", mode="history",
+                    include_data_in_result=false) → canonical OHLCV
     2. compute(code="ta.rsi(close, 14)", symbol="300750.SZ", interval="1d", mode="history")
   → 一行代码搞定
 ```
@@ -449,6 +452,8 @@ latest(), prev(), crossover(), crossunder(), bbands(), macd()
 如果一个会话里加载了多份 OHLCV（例如同一 symbol 的 `1d/history` 和 `1m/latest`），
 后续 `compute` 必须复用相同的 `symbol/interval/mode/start/end` selector，否则可能拿错数据帧。
 一旦显式给了 `symbol`，`compute` 只会在该 symbol 的数据里查找，不会回退到别的 symbol。
+如果只是为了让数据进入 `compute`，优先把 `include_data_in_result` 设为 `False`；
+只有当 agent 真要直接展示最近几根 K 线时，才需要把它设为 `True`。
 
 安全边界：eval-first 策略 / 黑名单 builtins / 无网络 / SIGALRM 超时 / 输出自动序列化。
 

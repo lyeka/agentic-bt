@@ -82,6 +82,8 @@ def register(kernel: object) -> None:
             "bbands(close,length,std)→(upper,mid,lower), macd(close)→(macd,signal,hist), tail, nz。"
             "返回: 单表达式自动返回；多行代码最后一行若为表达式也会返回；也可显式设置 result。"
             "重要语义: market_ohlcv 只是在后台注入 df，不会把其返回 JSON 中的 data 变量带进来；"
+            "即使 market_ohlcv 用 include_data_in_result=false 隐藏了 data，"
+            "只要 selector 对得上，compute 仍然能拿到对应 df。"
             "如果已经抓过多个 symbol/interval/mode/start/end 组合，compute 必须复用同一组 selector 才能取到正确的 df。"
             "一旦显式提供 symbol，compute 只会在该 symbol 的数据范围内查找，不会回退到别的 symbol。"
             "若需价格序列请直接使用 df/close/date。date 在分钟数据中会包含时分秒。Series 使用 pandas 语义且默认 RangeIndex，"

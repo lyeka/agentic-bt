@@ -682,6 +682,8 @@ def test_builtin_technician_prompt_teaches_compute_contract():
     technician = defs["technician"]
 
     assert "there is no `data` variable" in technician.system_prompt
+    assert "include_data_in_result=false" in technician.system_prompt
+    assert "does not change fetch, DataStore hydration, or `compute` access" in technician.system_prompt
     assert "Never use `close[-1]` or `date[-1]`" in technician.system_prompt
     assert "already return latest scalar tuples" in technician.system_prompt
     assert "Variables created in one call do not survive into the next call" in technician.system_prompt

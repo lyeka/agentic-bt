@@ -40,6 +40,7 @@ def register(kernel: object, adapter: MarketAdapter) -> None:
     """向 Kernel 注册 market_ohlcv 工具"""
 
     def market_ohlcv(args: dict) -> dict:
+        include_data_in_result = args.get("include_data_in_result", True)
         query = build_market_query(
             symbol=args["symbol"],
             interval=args.get("interval"),
@@ -71,19 +72,21 @@ def register(kernel: object, adapter: MarketAdapter) -> None:
             },
         )
 
-        records = []
-        for _, row in df.iterrows():
-            volume = row["volume"]
-            if pd.isna(volume):
-                volume = 0
-            records.append({
-                "date": format_record_timestamp(row["date"], query.interval),
-                "open": round(float(row["open"]), 2),
-                "high": round(float(row["high"]), 2),
-                "low": round(float(row["low"]), 2),
-                "close": round(float(row["close"]), 2),
-                "volume": int(float(volume)),
-            })
+        total_rows = len(df)
+        records: list[dict] = []
+        if include_data_in_result:
+            for _, row in df.iterrows():
+                volume = row["volume"]
+                if pd.isna(volume):
+                    volume = 0
+                records.append({
+                    "date": format_record_timestamp(row["date"], query.interval),
+                    "open": round(float(row["open"]), 2),
+                    "high": round(float(row["high"]), 2),
+                    "low": round(float(row["low"]), 2),
+                    "close": round(float(row["close"]), 2),
+                    "volume": int(float(volume)),
+                })
 
         return {
             "symbol": query.symbol,
@@ -96,7 +99,8 @@ def register(kernel: object, adapter: MarketAdapter) -> None:
             "effective_start": result.effective_start,
             "effective_end": result.effective_end,
             "warning": result.warning,
-            "total_rows": len(records),
+            "total_rows": total_rows,
+            "data_in_result": include_data_in_result,
             "data": records,
         }
 
@@ -108,9 +112,12 @@ def register(kernel: object, adapter: MarketAdapter) -> None:
             "请结合返回中的 source/as_of/warning 判断新鲜度。默认: 1d/history 返回最近一年；"
             "分钟 history 返回当日盘中，休市则最近一个交易日；latest 需要显式指定分钟 interval。"
             "start/end 仅支持 history；1d 用 YYYY-MM-DD，分钟用 YYYY-MM-DD HH:MM:SS。"
-            "工具会把 DataFrame 存入 DataStore，供后续 compute 使用。"
+            "无论是否回显 data，工具都会把 DataFrame 存入 DataStore，供后续 compute 使用。"
+            "若只是把大窗口数据送入 compute，优先用 include_data_in_result=false 节省上下文；"
+            "若需要直接查看最近几根 OHLCV 明细，再用 include_data_in_result=true。"
             "如果你加载了多个 symbol/interval/mode/start/end 组合，compute 必须复用同一组 selector 才能取到正确数据。"
-            "注意: 返回结果中的 data 只是当前轮可读的 JSON，不会以 data 变量自动注入 compute。"
+            "注意: include_data_in_result 只控制返回 JSON 是否携带 data，不影响 fetch/DataStore/compute；"
+            "返回结果中的 data 只是当前轮可读的 JSON，不会以 data 变量自动注入 compute。"
         ),
         parameters={
             "type": "object",
@@ -135,6 +142,14 @@ def register(kernel: object, adapter: MarketAdapter) -> None:
                 "end": {
                     "type": "string",
                     "description": "history 截止时间；1d 用 YYYY-MM-DD，分钟用 YYYY-MM-DD HH:MM:SS",
+                },
+                "include_data_in_result": {
+                    "type": "boolean",
+                    "description": (
+                        "是否在返回 JSON 中附带 OHLCV data；false 时仍会 fetch 并写入 DataStore，"
+                        "后续 compute 仍可使用，适合大窗口只入管道不回显的场景"
+                    ),
+                    "default": True,
                 },
             },
             "required": ["symbol"],

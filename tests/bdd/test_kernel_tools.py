@@ -22,6 +22,10 @@ FEATURE = "features/kernel_tools.feature"
 def test_market_ohlcv(): pass
 
 
+@scenario(FEATURE, "market_ohlcv 可只入管道不回显 data")
+def test_market_ohlcv_without_result_data(): pass
+
+
 @scenario(FEATURE, "market_ohlcv 透传 interval/mode/start/end 参数")
 def test_market_ohlcv_selector_passthrough(): pass
 
@@ -139,6 +143,7 @@ def test_compute_schema_explains_series_and_market_handoff():
     desc = kernel._tools["compute"].schema["function"]["description"]
 
     assert "不会把其返回 JSON 中的 data 变量带进来" in desc
+    assert "include_data_in_result=false" in desc
     assert "每次调用独立命名空间" in desc
     assert "latest(close) 或 close.iloc[-1]" in desc
     assert "不要写 close[-1]/date[-1]" in desc
@@ -152,11 +157,14 @@ def test_market_schema_explains_compute_handoff():
     market.register(kernel, adapter)
 
     desc = kernel._tools["market_ohlcv"].schema["function"]["description"]
+    params = kernel._tools["market_ohlcv"].schema["function"]["parameters"]["properties"]
 
-    assert "DataFrame 存入 DataStore" in desc
+    assert "无论是否回显 data" in desc
     assert "latest 不是交易所实时流" in desc
     assert "compute 必须复用同一组 selector" in desc
     assert "不会以 data 变量自动注入 compute" in desc
+    assert "不影响 fetch/DataStore/compute" in desc
+    assert "include_data_in_result" in params
 
 
 @given("一个带市场工具的 Kernel（记录 fetch 参数）", target_fixture="ktctx")
@@ -258,6 +266,19 @@ def when_market(ktctx, symbol, interval, mode):
     return ktctx
 
 
+@when(parsers.parse('调用 market_ohlcv symbol "{symbol}" interval "{interval}" mode "{mode}" include_data_in_result "{flag}"'), target_fixture="ktctx")
+def when_market_with_data_visibility(ktctx, symbol, interval, mode, flag):
+    ktctx["result"] = ktctx["kernel"]._tools["market_ohlcv"].handler(
+        {
+            "symbol": symbol,
+            "interval": interval,
+            "mode": mode,
+            "include_data_in_result": flag.lower() == "true",
+        }
+    )
+    return ktctx
+
+
 @when(parsers.parse('调用 market_ohlcv symbol "{symbol}" interval "{interval}" mode "{mode}" start "{start}" end "{end}"'), target_fixture="ktctx")
 def when_market_with_range(ktctx, symbol, interval, mode, start, end):
     ktctx["result"] = ktctx["kernel"]._tools["market_ohlcv"].handler(
@@ -348,6 +369,15 @@ def then_has_data_and_total(ktctx):
     result = ktctx["result"]
     assert "data" in result and isinstance(result["data"], list)
     assert "total_rows" in result and result["total_rows"] > 0
+    assert result["data_in_result"] is True
+
+
+@then("结果标记 data 未回显但 total_rows 保留")
+def then_data_hidden_with_total(ktctx):
+    result = ktctx["result"]
+    assert result["data"] == []
+    assert result["total_rows"] > 0
+    assert result["data_in_result"] is False
 
 
 @then("结果包含 market 元数据")
@@ -381,6 +411,11 @@ def then_datastore(ktctx, key):
 @then("结果 result 为正整数")
 def then_positive_int(ktctx):
     assert int(ktctx["result"]["result"]) > 0
+
+
+@then(parsers.parse('结果 result 等于 {value:d}'))
+def then_result_equals(ktctx, value):
+    assert int(ktctx["result"]["result"]) == value
 
 
 @then(parsers.parse('第一次结果 result 等于 {value:d}'))

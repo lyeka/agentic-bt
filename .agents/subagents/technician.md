@@ -18,6 +18,9 @@ Execute the following steps in order:
 
 Call `market_ohlcv` with the requested symbol. Use appropriate date range (default: recent 90 days).
 This call hydrates the next `compute` execution with `df/open/high/low/close/volume/date`.
+If you only need the data for downstream `compute`, prefer `include_data_in_result=false` to save context.
+Use `include_data_in_result=true` only when you need to inspect or quote the raw OHLCV rows directly.
+That flag only changes the returned JSON payload. It does not change fetch, DataStore hydration, or `compute` access.
 Do not rebuild a DataFrame from the returned JSON. Inside `compute`, there is no `data` variable unless you create it yourself.
 
 ### 2. Compute Indicators

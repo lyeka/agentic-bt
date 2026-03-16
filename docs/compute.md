@@ -22,6 +22,7 @@
 - `symbol/interval/mode/start/end`: 可选 selector，用来选择 DataStore 中哪一份 OHLCV
 
 `compute` 不会请求行情。没有匹配数据时会返回错误，提示先用相同 selector 调 `market_ohlcv`。
+即使 `market_ohlcv` 使用了 `include_data_in_result=false` 隐藏返回里的 `data`，只要 selector 一致，`compute` 仍然会拿到对应的 `df`。
 
 ## 执行环境
 
@@ -80,14 +81,14 @@
 日线分析：
 
 ```text
-market_ohlcv(symbol="AAPL", interval="1d", mode="history")
+market_ohlcv(symbol="AAPL", interval="1d", mode="history", include_data_in_result=false)
 compute(code="latest(ta.rsi(close, 14))", symbol="AAPL", interval="1d", mode="history")
 ```
 
 盘中最新 bar：
 
 ```text
-market_ohlcv(symbol="600519.SH", interval="1m", mode="latest")
+market_ohlcv(symbol="600519.SH", interval="1m", mode="latest", include_data_in_result=true)
 compute(code="{'close': latest(close), 'time': str(latest(date))}",
         symbol="600519.SH", interval="1m", mode="latest")
 ```
@@ -96,7 +97,8 @@ compute(code="{'close': latest(close), 'time': str(latest(date))}",
 
 ```text
 market_ohlcv(symbol="600519.SH", interval="1m", mode="history",
-             start="2026-03-12 09:30:00", end="2026-03-12 10:30:00")
+             start="2026-03-12 09:30:00", end="2026-03-12 10:30:00",
+             include_data_in_result=false)
 compute(code="len(df)", symbol="600519.SH", interval="1m", mode="history",
         start="2026-03-12 09:30:00", end="2026-03-12 10:30:00")
 ```
@@ -118,6 +120,8 @@ market_ohlcv 只是把 DataFrame 注入后台
 compute 直接使用 df/open/high/low/close/volume/date
 ```
 
+如果你不需要直接查看原始 bars，优先把 `include_data_in_result` 设成 `false`，这样 JSON 不会携带大段 `data`，但 `compute` 仍然照常可用。
+
 ### 错误 2：拉了多份数据却不带 selector
 
 错误：
@@ -136,7 +140,24 @@ compute 直接使用 df/open/high/low/close/volume/date
 compute(code="latest(close)", symbol="600519.SH", interval="1d", mode="history")
 ```
 
-### 错误 3：分钟数据把 `date` 当成纯日期
+### 错误 3：把 `include_data_in_result=false` 当成“没有数据”
+
+错误：
+
+```text
+market_ohlcv(..., include_data_in_result=false) 返回 data=[]
+→ 误以为这次调用没有抓到 OHLCV
+```
+
+正确：
+
+```text
+看 total_rows 和 data_in_result
+只要 total_rows > 0 且 data_in_result=false，就表示数据已经进入 DataStore
+后续 compute 可以直接复用同一组 selector
+```
+
+### 错误 4：分钟数据把 `date` 当成纯日期
 
 分钟和 latest 数据的 `date` 带时分秒。要做盘中判断时，直接用：
 

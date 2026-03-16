@@ -29,7 +29,8 @@
   "interval": "1m",
   "mode": "history",
   "start": "2026-03-12 09:30:00",
-  "end": "2026-03-12 10:30:00"
+  "end": "2026-03-12 10:30:00",
+  "include_data_in_result": false
 }
 ```
 
@@ -41,6 +42,9 @@
   - `history`: 返回一段 OHLCV
   - `latest`: 返回最新可用的一根分钟 bar
 - `start/end`: 仅 `history` 支持
+- `include_data_in_result`:
+  - `true`: 返回完整 `data`
+  - `false`: 只把数据注入 DataStore，返回 `data=[]`
 
 ### 默认行为
 
@@ -55,6 +59,7 @@
 - `interval="1d"` 禁止配 `mode="latest"`
 - 日线 `start/end` 用 `YYYY-MM-DD`
 - 分钟 `start/end` 用 `YYYY-MM-DD HH:MM:SS`
+- `include_data_in_result` 只控制返回 JSON 是否带 `data`，不影响 fetch、DataStore 注入和后续 `compute`
 
 ### 返回结构
 
@@ -71,6 +76,17 @@
   "effective_end": "2026-03-12 10:13:00",
   "warning": "Yahoo Finance intraday data may be delayed for this market.",
   "total_rows": 1,
+  "data_in_result": false,
+  "data": []
+}
+```
+
+当 `include_data_in_result=true` 时，`data` 会恢复为完整 OHLCV 列表：
+
+```json
+{
+  "total_rows": 1,
+  "data_in_result": true,
   "data": [
     {
       "date": "2026-03-12 10:13:00",
@@ -84,6 +100,8 @@
 }
 ```
 
+注意：`data=[]` 且 `total_rows>0` 表示“数据已抓取并写入 DataStore，但当前轮没有回显 OHLCV 明细”，不是“没有抓到数据”。
+
 ### DataStore 语义
 
 每次调用 `market_ohlcv` 都会把 DataFrame 写入多个 key：
@@ -94,6 +112,7 @@
 - 全局别名：`_default_ohlcv`
 
 这让同一 symbol 的日线、分钟线、latest 可以并存，不会互相覆盖。
+即使 `include_data_in_result=false`，这些 key 也会照常写入。
 
 ## compute
 
@@ -133,6 +152,7 @@
 ### 重要约束
 
 - `market_ohlcv` 返回 JSON 里的 `data` 不会自动注入 `compute`
+- 即使 `market_ohlcv(..., include_data_in_result=false)`，`compute` 仍然可以直接使用对应 `df`
 - 如果你加载了多个数据集，后续 `compute` 必须复用同一组 selector
 - 一旦显式提供 `symbol`，`compute` 不会跨 symbol 回退
 - 分钟数据的 `date` 带时分秒
@@ -141,12 +161,14 @@
 ### 正确用法
 
 ```text
-1. market_ohlcv(symbol="600519.SH", interval="1d", mode="history")
+1. market_ohlcv(symbol="600519.SH", interval="1d", mode="history",
+                include_data_in_result=false)
 2. compute(code="latest(ta.rsi(close, 14))", symbol="600519.SH", interval="1d", mode="history")
 ```
 
 ```text
-1. market_ohlcv(symbol="600519.SH", interval="1m", mode="latest")
+1. market_ohlcv(symbol="600519.SH", interval="1m", mode="latest",
+                include_data_in_result=true)
 2. compute(code="{'last_close': latest(close), 'last_time': str(latest(date))}",
            symbol="600519.SH", interval="1m", mode="latest")
 ```
@@ -154,6 +176,7 @@
 ### 常见误区
 
 - 把 `latest` 理解成“绝对实时”
+- 把 `include_data_in_result=false` 理解成“不会进 compute”
 - 先拉了 `1d/history`，再拉 `1m/latest`，随后 `compute` 只传 `symbol`，结果拿错数据帧
 - 试图在 `compute` 里直接使用 `market_ohlcv` 的 JSON 结果
 

@@ -134,6 +134,7 @@ def test_seed_prompt_bootstraps_on_first_durable_signal():
     assert "长期偏好、持仓、关注方向、风险边界、投资目标" in SEED_PROMPT
     assert "不要为了建档而建档" in SEED_PROMPT
     assert "记住" in SEED_PROMPT and "重要提醒" in SEED_PROMPT
+    assert "include_data_in_result" in SEED_PROMPT
 
 
 def test_kernel_emits_llm_call_error_on_provider_exception():
