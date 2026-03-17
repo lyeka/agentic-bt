@@ -19,7 +19,7 @@ from athenaclaw.automation.store import AutomationStore
 from athenaclaw.automation import tools as automation_tools
 from athenaclaw.llm.providers import LLMProvider, OpenAIChatProvider
 from athenaclaw.runtime.session_store import JsonSessionStore, SessionStore
-from athenaclaw.tools import bash, compute, edit, market, portfolio, read, web, write
+from athenaclaw.tools import bash, compute, edit, market, portfolio, read, watchlist, web, write
 from athenaclaw.subagents import SubAgentDef
 
 
@@ -235,6 +235,7 @@ def build_kernel_bundle(
     market.register(kernel, _build_market_adapter(config))
     compute.register(kernel)
     portfolio.register(kernel, workspace)
+    watchlist.register(kernel, workspace)
     read.register(kernel, workspace, cwd=cwd)
     write.register(kernel, workspace, cwd=cwd)
     edit.register(kernel, workspace, cwd=cwd)

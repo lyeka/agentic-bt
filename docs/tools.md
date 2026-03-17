@@ -11,6 +11,7 @@
 |------|------|
 | `market_ohlcv` | 获取 OHLCV，写入 DataStore，供 `compute` 消费 |
 | `portfolio` | 维护结构化当前持仓快照 `portfolio.json` |
+| `watchlist` | 维护结构化自选列表快照 `watchlist.json` |
 | `compute` | 在沙箱中对已加载 OHLCV 做 Python 分析 |
 | `read` | 读工作区文件 |
 | `write` | 写工作区文件 |
@@ -18,7 +19,7 @@
 | `bash` | 执行 shell 命令（按权限控制） |
 | `web_search` / `web_fetch` | 可选 Web 搜索与抓取 |
 
-其中最容易用错的是 `portfolio`、`market_ohlcv` 和 `compute`。
+其中最容易用错的是 `portfolio`、`watchlist`、`market_ohlcv` 和 `compute`。
 
 ## portfolio
 
@@ -53,6 +54,56 @@
 
 `memory.md` 适合长期偏好、风险边界、关注方向。
 详细持仓需要结构化读取和 UI 展示，因此单独维护在 `portfolio.json`。
+
+## watchlist
+
+### 核心语义
+
+`watchlist` 维护的是**当前有效的自选列表快照**，不是持仓，不是研究日志，也不是价格提醒引擎。
+
+适合的输入：
+
+- 用户说“把某个 symbol 加到自选 / 从自选删除”
+- 用户直接给出当前完整自选列表
+- 用户希望围绕某个观察理由持续跟踪标的
+
+不适合的输入：
+
+- 当前持仓
+- 长篇研究过程
+- 止盈止损/价格提醒规则
+- symbol 识别不清的内容
+
+### action
+
+- `get`: 读取全部列表或某个列表
+- `upsert`: 更新某个列表
+- `remove_items`: 从列表中删除若干 symbol
+- `delete_list`: 删除整个列表
+
+`upsert` 的关键参数是 `items_mode`：
+
+- `replace`: 本次给出的 `items` 就是该列表当前完整快照
+- `merge`: 只更新提到的 symbol，未提到的不动
+
+### 条目字段
+
+- `symbol`: 当前观察的标的
+- `name`: 可选显示名，便于人和 UI 阅读；不参与身份识别
+- `watch_reason`: 当前这轮观察的核心问题；后续分析和自动化巡检会围绕它展开
+- `added_at`: 本轮观察开始时间；用于复盘“加入自选后走势”
+
+`name` 和 `watch_reason` 的更新协议：
+
+- 省略：保留旧值
+- 传非空字符串：更新
+- 传 `null`：清空
+- 传空字符串：报错
+
+### 为什么不用 memory.md
+
+`memory.md` 适合记录高层关注方向和长期偏好。
+具体自选 symbol 清单、观察理由和加入时间需要结构化读取，因此单独维护在 `watchlist.json`。
 
 ## market_ohlcv
 

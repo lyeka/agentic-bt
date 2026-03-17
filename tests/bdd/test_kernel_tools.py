@@ -12,7 +12,7 @@ from pytest_bdd import given, parsers, scenario, then, when
 
 from athenaclaw.integrations.market.csv import CsvAdapter
 from athenaclaw.kernel import Kernel, Permission, Session
-from athenaclaw.tools import compute, edit, market, portfolio, read, write
+from athenaclaw.tools import compute, edit, market, portfolio, read, watchlist, write
 
 
 FEATURE = "features/kernel_tools.feature"
@@ -271,6 +271,249 @@ def test_portfolio_upsert_merge_and_delete(tmp_path):
 
     fetched = tool({"action": "get"})
     assert fetched["accounts"] == []
+
+
+def test_watchlist_schema_explains_snapshot_usage(tmp_path):
+    kernel = Kernel(api_key="test")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    watchlist.register(kernel, workspace)
+
+    desc = kernel._tools["watchlist"].schema["function"]["description"]
+    params = kernel._tools["watchlist"].schema["function"]["parameters"]["properties"]
+
+    assert "加入自选" in desc
+    assert "name" in desc
+    assert "watch_reason" in desc
+    assert "added_at" in desc
+    assert "items_mode=replace" in desc
+    assert "传 null=清空" in desc
+    assert "不要再写进 memory.md" in desc
+    assert "action" in params
+    assert "items" in params
+    assert "items_mode" in params
+
+
+def test_watchlist_upsert_merge_replace_remove_and_get(tmp_path, monkeypatch):
+    kernel = Kernel(api_key="test")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    watchlist.register(kernel, workspace)
+    times = iter(
+        [
+            "2026-03-17T02:00:00Z",
+            "2026-03-18T02:00:00Z",
+            "2026-03-19T02:00:00Z",
+            "2026-03-20T02:00:00Z",
+        ]
+    )
+    monkeypatch.setattr(watchlist, "_now_iso", lambda: next(times))
+
+    tool = kernel._tools["watchlist"].handler
+    created = tool(
+        {
+            "action": "upsert",
+            "items": [
+                {"symbol": "aapl", "name": "苹果", "watch_reason": "看 AI 换机周期"},
+                {"symbol": "nvda", "name": "英伟达"},
+            ],
+        }
+    )
+
+    assert created["status"] == "ok"
+    assert created["created"] is True
+    assert (workspace / "watchlist.json").exists()
+    assert created["list"]["list_id"] == "default"
+    assert created["list"]["items"][0]["symbol"] == "AAPL"
+    assert created["list"]["items"][0]["name"] == "苹果"
+    assert created["list"]["items"][0]["added_at"] == "2026-03-17T02:00:00Z"
+    assert created["list"]["items"][1]["name"] == "英伟达"
+    assert created["list"]["items"][1]["added_at"] == "2026-03-17T02:00:00Z"
+
+    merged = tool(
+        {
+            "action": "upsert",
+            "list_id": "default",
+            "items_mode": "merge",
+            "items": [
+                {"symbol": "AAPL"},
+                {"symbol": "NVDA", "name": "NVIDIA", "watch_reason": "看 AI capex 是否继续上修"},
+                {"symbol": "msft", "name": "微软", "watch_reason": "看 Copilot 渗透"},
+            ],
+        }
+    )
+
+    assert merged["status"] == "ok"
+    assert merged["created"] is False
+    assert merged["list"]["items"][0]["name"] == "苹果"
+    assert merged["list"]["items"][0]["watch_reason"] == "看 AI 换机周期"
+    assert merged["list"]["items"][0]["added_at"] == "2026-03-17T02:00:00Z"
+    assert merged["list"]["items"][1]["name"] == "NVIDIA"
+    assert merged["list"]["items"][1]["watch_reason"] == "看 AI capex 是否继续上修"
+    assert merged["list"]["items"][2]["symbol"] == "MSFT"
+    assert merged["list"]["items"][2]["name"] == "微软"
+    assert merged["list"]["items"][2]["added_at"] == "2026-03-18T02:00:00Z"
+
+    replaced = tool(
+        {
+            "action": "upsert",
+            "list_id": "default",
+            "items_mode": "replace",
+            "items": [
+                {"symbol": "MSFT"},
+                {"symbol": "AAPL", "name": "Apple", "watch_reason": "看服务收入加速"},
+            ],
+        }
+    )
+
+    assert replaced["status"] == "ok"
+    assert replaced["list"]["items"][0]["symbol"] == "MSFT"
+    assert replaced["list"]["items"][0]["name"] == "微软"
+    assert replaced["list"]["items"][0]["watch_reason"] == "看 Copilot 渗透"
+    assert replaced["list"]["items"][0]["added_at"] == "2026-03-18T02:00:00Z"
+    assert replaced["list"]["items"][1]["symbol"] == "AAPL"
+    assert replaced["list"]["items"][1]["name"] == "Apple"
+    assert replaced["list"]["items"][1]["watch_reason"] == "看服务收入加速"
+    assert replaced["list"]["items"][1]["added_at"] == "2026-03-17T02:00:00Z"
+
+    fetched = tool({"action": "get", "list_id": "default"})
+    assert fetched["status"] == "ok"
+    assert fetched["list"] == replaced["list"]
+
+    removed = tool(
+        {
+            "action": "remove_items",
+            "list_id": "default",
+            "symbols": ["AAPL", "MSFT"],
+        }
+    )
+    assert removed["status"] == "ok"
+    assert removed["deleted_list"] is True
+    assert removed["removed_symbols"] == ["MSFT", "AAPL"]
+
+    readded = tool(
+        {
+            "action": "upsert",
+            "list_id": "default",
+            "items_mode": "merge",
+            "items": [{"symbol": "AAPL"}],
+        }
+    )
+    assert readded["status"] == "ok"
+    assert readded["list"]["items"][0]["symbol"] == "AAPL"
+    assert readded["list"]["items"][0]["added_at"] == "2026-03-20T02:00:00Z"
+
+
+def test_watchlist_watch_reason_null_clear_and_empty_string_error(tmp_path, monkeypatch):
+    kernel = Kernel(api_key="test")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    watchlist.register(kernel, workspace)
+    times = iter(
+        [
+            "2026-03-17T02:00:00Z",
+            "2026-03-18T02:00:00Z",
+            "2026-03-19T02:00:00Z",
+        ]
+    )
+    monkeypatch.setattr(watchlist, "_now_iso", lambda: next(times))
+
+    tool = kernel._tools["watchlist"].handler
+    tool(
+        {
+            "action": "upsert",
+            "items": [{"symbol": "TSLA", "watch_reason": "看 Robotaxi 节奏"}],
+        }
+    )
+
+    cleared = tool(
+        {
+            "action": "upsert",
+            "items_mode": "merge",
+            "items": [{"symbol": "TSLA", "watch_reason": None}],
+        }
+    )
+    assert cleared["status"] == "ok"
+    assert "watch_reason" not in cleared["list"]["items"][0]
+    assert cleared["list"]["items"][0]["added_at"] == "2026-03-17T02:00:00Z"
+
+    invalid = tool(
+        {
+            "action": "upsert",
+            "items_mode": "merge",
+            "items": [{"symbol": "TSLA", "watch_reason": ""}],
+        }
+    )
+    assert invalid["error"] == "watch_reason 不能为空字符串；清空请传 null"
+
+
+def test_watchlist_name_null_clear_and_empty_string_error(tmp_path, monkeypatch):
+    kernel = Kernel(api_key="test")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    watchlist.register(kernel, workspace)
+    times = iter(
+        [
+            "2026-03-17T02:00:00Z",
+            "2026-03-18T02:00:00Z",
+            "2026-03-19T02:00:00Z",
+        ]
+    )
+    monkeypatch.setattr(watchlist, "_now_iso", lambda: next(times))
+
+    tool = kernel._tools["watchlist"].handler
+    tool(
+        {
+            "action": "upsert",
+            "items": [{"symbol": "601288.SH", "name": "农业银行"}],
+        }
+    )
+
+    cleared = tool(
+        {
+            "action": "upsert",
+            "items_mode": "merge",
+            "items": [{"symbol": "601288.SH", "name": None}],
+        }
+    )
+    assert cleared["status"] == "ok"
+    assert "name" not in cleared["list"]["items"][0]
+    assert cleared["list"]["items"][0]["added_at"] == "2026-03-17T02:00:00Z"
+
+    invalid = tool(
+        {
+            "action": "upsert",
+            "items_mode": "merge",
+            "items": [{"symbol": "601288.SH", "name": ""}],
+        }
+    )
+    assert invalid["error"] == "name 不能为空字符串；清空请传 null"
+
+
+def test_watchlist_delete_list(tmp_path, monkeypatch):
+    kernel = Kernel(api_key="test")
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    watchlist.register(kernel, workspace)
+    monkeypatch.setattr(watchlist, "_now_iso", lambda: "2026-03-17T02:00:00Z")
+
+    tool = kernel._tools["watchlist"].handler
+    created = tool(
+        {
+            "action": "upsert",
+            "list_id": "focus",
+            "items": [{"symbol": "00700.HK", "name": "腾讯控股", "watch_reason": "看游戏业务修复"}],
+        }
+    )
+    assert created["status"] == "ok"
+
+    deleted = tool({"action": "delete_list", "list_id": "focus"})
+    assert deleted["status"] == "ok"
+    assert deleted["deleted_list_id"] == "focus"
+
+    fetched = tool({"action": "get"})
+    assert fetched["status"] == "ok"
+    assert fetched["lists"] == {}
 
 
 @given("一个带市场工具的 Kernel（记录 fetch 参数）", target_fixture="ktctx")

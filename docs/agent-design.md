@@ -130,6 +130,7 @@ Pi/bub/ampcode 的核心洞见：**read/write/edit/bash 是最小完备工具集
 | `write(path, content)` | 通用原语 | 写 | 写 workspace 任意文件 |
 | `edit(path, old, new)` | 通用原语 | 精准修改 | diff-based 修改 |
 | `portfolio(action, ...)` | 领域增强 | 持仓快照 | 维护结构化当前持仓，不记录交易历史 |
+| `watchlist(action, ...)` | 领域增强 | 自选快照 | 维护结构化当前自选列表，不记录历史观察日志 |
 | `compute(code)` | 领域增强 | 计算器 | 沙箱化 Python（安全版 bash） |
 | `market_ohlcv(symbol, interval, mode)` | 领域核心 | 眼睛 | 内核数据原语，支持日线/分钟/history/latest |
 | `recall(query)` | 领域增强 | 回忆 | 全文搜索 memory + notebook |
@@ -140,7 +141,7 @@ notebook.write 就是 `write("notebook/xxx.md", content)`。
 memory.write 就是 `write("memory.md", content)`，read 就是 `read("memory.md")`。
 不需要单独的工具。
 
-但当前持仓是例外：它需要既能被 Agent 稳定读取，又能被 UI 直接消费，因此用 `portfolio` 维护 `portfolio.json` 这个轻量真相源，而不是继续把详细持仓散写在 memory.md 里。
+但当前持仓和具体自选列表是例外：它们需要被 Agent 稳定读取，也适合被自动化或 UI 直接消费，因此分别用 `portfolio` 维护 `portfolio.json`、用 `watchlist` 维护 `watchlist.json`，而不是继续把明细散写在 memory.md 里。
 
 read/write/edit 的覆盖范围：
 - 写研究报告 → `write("notebook/research/宁德时代/2024-01-15.md", content)`
