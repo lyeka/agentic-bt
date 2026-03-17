@@ -11,6 +11,8 @@ import asyncio
 import mimetypes
 import os
 import re
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -22,6 +24,9 @@ from athenaclaw.interfaces.im.backend import InboundMessage, OutboundRef
 from athenaclaw.interfaces.im.driver import IMDriver
 from athenaclaw.llm.messages import AttachmentRef
 from athenaclaw.runtime import AgentConfig
+
+_SUPPORTED_SLASH_COMMANDS = frozenset({"start", "help", "new", "reset", "compact", "context", "status"})
+_ACTIVE_INTERACTION: ContextVar[Any | None] = ContextVar("discord_active_interaction", default=None)
 
 
 def _parse_allowed_user_ids(raw: str | None) -> set[str]:
@@ -73,6 +78,47 @@ def _attachment_mime_type(attachment: Any) -> str:
 
 def _is_private_message(message: Any) -> bool:
     return getattr(message, "guild", None) is None
+
+
+def _is_private_interaction(interaction: Any) -> bool:
+    return getattr(interaction, "guild", None) is None
+
+
+def _missing_allowlist_text(user_id: str) -> str:
+    return (
+        "未配置 DISCORD_ALLOWED_USER_IDS，已拒绝执行。\n"
+        f"你的 Discord user_id 是: {user_id}\n"
+        "请在 .env 中配置 DISCORD_ALLOWED_USER_IDS 后重启。"
+    )
+
+
+def _interaction_type_name(interaction: Any) -> str:
+    kind = getattr(interaction, "type", None)
+    name = getattr(kind, "name", None)
+    if name:
+        return str(name).lower()
+    return str(kind or "").lower()
+
+
+def _interaction_command_name(interaction: Any) -> str | None:
+    data = getattr(interaction, "data", None)
+    if not isinstance(data, dict):
+        return None
+    name = str(data.get("name", "") or "").strip().lower().lstrip("/")
+    return name or None
+
+
+def _interaction_channel_id(interaction: Any) -> str | None:
+    channel_id = getattr(interaction, "channel_id", None)
+    if channel_id is not None:
+        return str(channel_id)
+    channel = getattr(interaction, "channel", None)
+    if channel is None:
+        return None
+    value = getattr(channel, "id", None)
+    if value is None:
+        return None
+    return str(value)
 
 
 def _reply_to_message_id(message: Any) -> str | None:
@@ -217,6 +263,22 @@ class DiscordBackend:
     view_factory: Callable[[asyncio.Future, int], Any] | None = None
     max_text_len: int = 1900
 
+    @contextmanager
+    def bind_interaction_response(self, interaction: Any):
+        token = _ACTIVE_INTERACTION.set(interaction)
+        try:
+            yield
+        finally:
+            _ACTIVE_INTERACTION.reset(token)
+
+    def _active_interaction(self, conversation_id: str) -> Any | None:
+        interaction = _ACTIVE_INTERACTION.get()
+        if interaction is None:
+            return None
+        if _interaction_channel_id(interaction) != str(conversation_id):
+            return None
+        return interaction
+
     async def _fetch_channel(self, conversation_id: str) -> Any:
         channel_id = int(conversation_id)
         getter = getattr(self.client, "get_channel", None)
@@ -239,7 +301,31 @@ class DiscordBackend:
             return partial(int(ref.message_id))
         raise RuntimeError(f"无法获取 Discord message: {ref.message_id}")
 
+    async def _send_interaction_text(self, interaction: Any, conversation_id: str, text: str) -> OutboundRef:
+        response = getattr(interaction, "response", None)
+        message = None
+        if response is not None and hasattr(response, "is_done") and not response.is_done():
+            await response.send_message(text)
+            getter = getattr(interaction, "original_response", None)
+            if callable(getter):
+                message = await getter()
+        else:
+            followup = getattr(interaction, "followup", None)
+            if followup is not None:
+                message = await followup.send(text, wait=True)
+            elif response is not None:
+                await response.send_message(text)
+                getter = getattr(interaction, "original_response", None)
+                if callable(getter):
+                    message = await getter()
+
+        message_id = str(getattr(message, "id", None) or getattr(interaction, "id", "interaction"))
+        return OutboundRef(conversation_id=conversation_id, message_id=message_id)
+
     async def send_text(self, conversation_id: str, text: str) -> OutboundRef:
+        interaction = self._active_interaction(conversation_id)
+        if interaction is not None:
+            return await self._send_interaction_text(interaction, conversation_id, text)
         channel = await self._fetch_channel(conversation_id)
         message = await channel.send(text)
         return OutboundRef(conversation_id=conversation_id, message_id=str(message.id))
@@ -278,6 +364,72 @@ class DiscordBackend:
             stopper = getattr(view, "stop", None)
             if callable(stopper):
                 stopper()
+
+
+async def _send_interaction_text(interaction: Any, text: str, *, ephemeral: bool = False) -> None:
+    response = getattr(interaction, "response", None)
+    if response is not None and hasattr(response, "is_done") and not response.is_done():
+        await response.send_message(text, ephemeral=ephemeral)
+        return
+    followup = getattr(interaction, "followup", None)
+    if followup is not None:
+        await followup.send(text, ephemeral=ephemeral)
+
+
+async def _handle_command_interaction(
+    *,
+    interaction: Any,
+    driver: IMDriver,
+    backend: DiscordBackend,
+    allowed_user_ids: set[str],
+) -> bool:
+    if _interaction_type_name(interaction) != "application_command":
+        return False
+
+    command_name = _interaction_command_name(interaction)
+    if not command_name:
+        return False
+
+    if command_name not in _SUPPORTED_SLASH_COMMANDS:
+        await _send_interaction_text(
+            interaction,
+            "未知命令。可用: /start /help /new /reset /compact /context /status",
+            ephemeral=True,
+        )
+        return True
+
+    author = getattr(interaction, "user", None)
+    conversation_id = _interaction_channel_id(interaction)
+    if author is None or conversation_id is None:
+        return False
+
+    if not allowed_user_ids:
+        await _send_interaction_text(
+            interaction,
+            _missing_allowlist_text(str(getattr(author, "id", ""))),
+            ephemeral=True,
+        )
+        return True
+
+    is_private = _is_private_interaction(interaction)
+    response = getattr(interaction, "response", None)
+    if response is not None and hasattr(response, "is_done") and not response.is_done():
+        await response.defer(thinking=True)
+
+    inbound = InboundMessage(
+        adapter="discord",
+        conversation_id=conversation_id,
+        user_id=str(author.id),
+        is_private=is_private,
+        text=f"/{command_name}",
+        message_id=str(getattr(interaction, "id", f"interaction:{command_name}")),
+        reply_to_message_id=None,
+        ts=getattr(interaction, "created_at", datetime.now(timezone.utc)),
+        attachments=(),
+    )
+    with backend.bind_interaction_response(interaction):
+        await driver.handle(inbound)
+    return True
 
 
 def main() -> None:
@@ -325,6 +477,16 @@ def main() -> None:
                 show_process_messages=show_process_messages,
             )
 
+        async def on_interaction(self, interaction: Any) -> None:
+            handled = await _handle_command_interaction(
+                interaction=interaction,
+                driver=self._driver,
+                backend=self._backend,
+                allowed_user_ids=allowed,
+            )
+            if handled:
+                return
+
         async def on_message(self, message: Any) -> None:
             author = getattr(message, "author", None)
             if author is None:
@@ -338,11 +500,7 @@ def main() -> None:
 
             if not allowed:
                 if is_private:
-                    await message.channel.send(
-                        "未配置 DISCORD_ALLOWED_USER_IDS，已拒绝执行。\n"
-                        f"你的 Discord user_id 是: {author.id}\n"
-                        "请在 .env 中配置 DISCORD_ALLOWED_USER_IDS 后重启。"
-                    )
+                    await message.channel.send(_missing_allowlist_text(str(author.id)))
                 return
 
             attachments, media_error = await _collect_attachments(

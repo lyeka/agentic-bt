@@ -8,12 +8,14 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
 from athenaclaw.interfaces.discord import (
     DiscordBackend,
     _collect_attachments,
+    _handle_command_interaction,
     _parse_allowed_user_ids,
     _parse_bool,
     _reply_to_message_id,
@@ -189,3 +191,194 @@ def test_discord_backend_ask_confirm_uses_injected_view_factory():
         return await backend.ask_confirm("1001", "确认操作 soul.md?", timeout_sec=3)
 
     assert asyncio.run(_run()) is True
+
+
+def test_discord_backend_send_text_uses_bound_interaction_followup():
+    class FakeMessage:
+        def __init__(self, message_id: int) -> None:
+            self.id = message_id
+
+    class FakeChannel:
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+
+        async def send(self, content: str, view=None):
+            self.sent.append(content)
+            return FakeMessage(1)
+
+    class FakeClient:
+        def __init__(self, channel: FakeChannel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            assert channel_id == 1001
+            return self._channel
+
+    class FakeFollowup:
+        def __init__(self) -> None:
+            self.sent: list[tuple[str, bool]] = []
+
+        async def send(self, content: str, *, wait: bool = False, ephemeral: bool = False):
+            self.sent.append((content, wait))
+            assert ephemeral is False
+            return FakeMessage(9)
+
+    channel = FakeChannel()
+    backend = DiscordBackend(client=FakeClient(channel))
+    interaction = SimpleNamespace(
+        id=77,
+        channel_id=1001,
+        response=SimpleNamespace(is_done=lambda: True),
+        followup=FakeFollowup(),
+    )
+
+    async def _run():
+        with backend.bind_interaction_response(interaction):
+            return await backend.send_text("1001", "slash-ok")
+
+    ref = asyncio.run(_run())
+    assert channel.sent == []
+    assert interaction.followup.sent == [("slash-ok", True)]
+    assert ref.message_id == "9"
+
+
+def test_handle_command_interaction_defers_and_routes_through_backend():
+    class FakeMessage:
+        def __init__(self, message_id: int) -> None:
+            self.id = message_id
+
+    class FakeChannel:
+        def __init__(self) -> None:
+            self.sent: list[str] = []
+
+        async def send(self, content: str, view=None):
+            self.sent.append(content)
+            return FakeMessage(1)
+
+    class FakeClient:
+        def __init__(self, channel: FakeChannel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            assert channel_id == 1001
+            return self._channel
+
+    class FakeResponse:
+        def __init__(self) -> None:
+            self.deferred = False
+
+        def is_done(self) -> bool:
+            return self.deferred
+
+        async def defer(self, *, thinking: bool = False) -> None:
+            self.deferred = True
+            assert thinking is True
+
+        async def send_message(self, content: str, *, ephemeral: bool = False) -> None:
+            raise AssertionError("deferred interaction should answer through followup")
+
+    class FakeFollowup:
+        def __init__(self) -> None:
+            self.sent: list[tuple[str, bool, bool]] = []
+
+        async def send(self, content: str, *, wait: bool = False, ephemeral: bool = False):
+            self.sent.append((content, wait, ephemeral))
+            return FakeMessage(22)
+
+    class FakeDriver:
+        def __init__(self, backend: DiscordBackend) -> None:
+            self.backend = backend
+            self.calls = []
+
+        async def handle(self, msg) -> None:
+            self.calls.append(msg)
+            await self.backend.send_text(msg.conversation_id, "已开始新会话。")
+
+    channel = FakeChannel()
+    backend = DiscordBackend(client=FakeClient(channel))
+    driver = FakeDriver(backend)
+    interaction = SimpleNamespace(
+        id=88,
+        type=SimpleNamespace(name="application_command"),
+        data={"name": "new"},
+        channel_id=1001,
+        guild=None,
+        user=SimpleNamespace(id=42),
+        created_at=datetime(2026, 3, 18, tzinfo=timezone.utc),
+        response=FakeResponse(),
+        followup=FakeFollowup(),
+    )
+
+    async def _run():
+        return await _handle_command_interaction(
+            interaction=interaction,
+            driver=driver,  # type: ignore[arg-type]
+            backend=backend,
+            allowed_user_ids={"42"},
+        )
+
+    handled = asyncio.run(_run())
+    assert handled is True
+    assert interaction.response.deferred is True
+    assert len(driver.calls) == 1
+    assert driver.calls[0].text == "/new"
+    assert driver.calls[0].conversation_id == "1001"
+    assert interaction.followup.sent == [("已开始新会话。", True, False)]
+    assert channel.sent == []
+
+
+def test_handle_command_interaction_warns_when_allowlist_missing():
+    class FakeChannel:
+        async def send(self, content: str, view=None):
+            raise AssertionError("missing allowlist should not send directly to channel")
+
+    class FakeClient:
+        def __init__(self, channel: FakeChannel) -> None:
+            self._channel = channel
+
+        def get_channel(self, channel_id: int):
+            return self._channel
+
+    class FakeResponse:
+        def __init__(self) -> None:
+            self.sent: list[tuple[str, bool]] = []
+
+        def is_done(self) -> bool:
+            return False
+
+        async def defer(self, *, thinking: bool = False) -> None:
+            raise AssertionError("missing allowlist should answer immediately")
+
+        async def send_message(self, content: str, *, ephemeral: bool = False) -> None:
+            self.sent.append((content, ephemeral))
+
+    class FakeDriver:
+        async def handle(self, msg) -> None:
+            raise AssertionError("missing allowlist should not reach driver")
+
+    backend = DiscordBackend(client=FakeClient(FakeChannel()))
+    interaction = SimpleNamespace(
+        id=99,
+        type=SimpleNamespace(name="application_command"),
+        data={"name": "new"},
+        channel_id=1001,
+        guild=None,
+        user=SimpleNamespace(id=1234),
+        created_at=datetime(2026, 3, 18, tzinfo=timezone.utc),
+        response=FakeResponse(),
+        followup=SimpleNamespace(send=None),
+    )
+
+    async def _run():
+        return await _handle_command_interaction(
+            interaction=interaction,
+            driver=FakeDriver(),  # type: ignore[arg-type]
+            backend=backend,
+            allowed_user_ids=set(),
+        )
+
+    handled = asyncio.run(_run())
+    assert handled is True
+    assert len(interaction.response.sent) == 1
+    assert "DISCORD_ALLOWED_USER_IDS" in interaction.response.sent[0][0]
+    assert interaction.response.sent[0][1] is True
