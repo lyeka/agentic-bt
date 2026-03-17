@@ -1,6 +1,6 @@
 """
-[INPUT]: json, pathlib, enum, agent.skills, agent.subagents, agent.messages, agent.providers (LLMProvider/LLMResult/LLMToolCall/OpenAIChatProvider)
-[OUTPUT]: Kernel — 核心协调器（_do_llm_call 统一入口 + _stream_complete 流式 + tool policy + per-turn execution context）；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；skill_invoke
+[INPUT]: json, pathlib, shutil, enum, agent.skills, agent.subagents, agent.messages, agent.providers (LLMProvider/LLMResult/LLMToolCall/OpenAIChatProvider)
+[OUTPUT]: Kernel — 核心协调器（_do_llm_call 统一入口 + _stream_complete 流式 + tool policy + per-turn execution context + skill 合约验证 + 降级事件）；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；skill_invoke
 [POS]: agent 包核心，系统唯一协调中心：ReAct loop + 声明式 wire/emit + DataStore + 权限 + 自举 + Skill Engine + SubAgent System + stream/非 stream 双轨 LLM 调用
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 from collections import defaultdict
 from datetime import datetime
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ from athenaclaw.skills import (
     expand_explicit_skill_command,
     invoke_skill,
     load_skills,
+    validate_references,
 )
 from athenaclaw.subagents.loader import load_subagents
 from athenaclaw.subagents.models import SubAgentDef
@@ -349,10 +351,12 @@ class Kernel:
     ) -> None:
         """启动：soul + workspace 使用指南 → 系统提示词"""
         self._workspace = workspace
+        self._cwd = cwd or Path.cwd()
         workspace.mkdir(parents=True, exist_ok=True)
-        self._load_skills(cwd=(cwd or Path.cwd()), skill_roots=skill_roots)
+        self._load_skills(cwd=self._cwd, skill_roots=skill_roots)
         self._register_skill_invoke_tool()
-        self._load_subagents(cwd=(cwd or Path.cwd()), subagent_roots=subagent_roots)
+        self._validate_skills()
+        self._load_subagents(cwd=self._cwd, subagent_roots=subagent_roots)
         self._assemble_system_prompt()
 
     def _assemble_system_prompt(self) -> None:
@@ -364,7 +368,12 @@ class Kernel:
             from athenaclaw.kernel.seed import SEED_PROMPT
             identity = SEED_PROMPT
         parts = [identity, WORKSPACE_GUIDE, AUTOMATION_GUIDE]
-        skills_xml = build_available_skills_prompt(self._skills)
+        ready_skills = {
+            name: skill
+            for name, skill in self._skills.items()
+            if self._skill_status.get(name) == "ready"
+        }
+        skills_xml = build_available_skills_prompt(ready_skills)
         if skills_xml and ("read" in self._tools or "skill_invoke" in self._tools):
             parts.append(skills_xml)
         if self._subagent_system:
@@ -373,13 +382,17 @@ class Kernel:
                 parts.append(team_xml)
         self._system_prompt = "\n\n".join(parts)
 
-    def _load_skills(self, cwd: Path, skill_roots: list[Path] | None) -> None:
+    def _load_skills(self, cwd: Path, skill_roots: list[Path] | None = None) -> None:
         roots: list[tuple[Path, str]]
         if skill_roots is not None:
             roots = [(Path(path).expanduser(), "path") for path in skill_roots]
+            self._last_skill_roots = skill_roots  # 保存用于 reload
+        elif hasattr(self, "_last_skill_roots") and self._last_skill_roots is not None:
+            roots = [(Path(path).expanduser(), "path") for path in self._last_skill_roots]
         else:
             roots = self._default_skill_roots(cwd.resolve())
         self._skills, self._skill_diagnostics = load_skills(roots)
+        self._skill_status: dict[str, str] = {}
         self.emit(
             "skills.loaded",
             {
@@ -388,6 +401,41 @@ class Kernel:
                 "diagnostics": self._skill_diagnostics,
             },
         )
+
+    def _validate_skills(self) -> None:
+        """验证 skill 的 requires 合约：tools/bins 依赖检查 + 引用文件验证。"""
+        registered = set(self._tools)
+        degraded: list[dict[str, Any]] = []
+        for name, skill in self._skills.items():
+            missing_tools = sorted(set(skill.required_tools or []) - registered)
+            missing_bins = [
+                b for b in (skill.required_bins or [])
+                if shutil.which(b) is None
+            ]
+            if missing_tools or missing_bins:
+                self._skill_status[name] = "degraded"
+                reason: dict[str, Any] = {"name": name}
+                if missing_tools:
+                    reason["missing_tools"] = missing_tools
+                if missing_bins:
+                    reason["missing_bins"] = missing_bins
+                degraded.append(reason)
+                self._skill_diagnostics.append({
+                    "level": "warning",
+                    "code": "missing_required_deps",
+                    "name": name,
+                    "message": (
+                        f"skill '{name}' 因缺少依赖被降级"
+                        + (f"（工具: {', '.join(missing_tools)}）" if missing_tools else "")
+                        + (f"（可执行文件: {', '.join(missing_bins)}）" if missing_bins else "")
+                    ),
+                })
+            else:
+                self._skill_status[name] = "ready"
+            # 引用文件验证（非阻塞，仅产出诊断）
+            validate_references(skill, self._skill_diagnostics)
+        if degraded:
+            self.emit("skills.degraded", {"degraded": degraded})
 
     def _default_skill_roots(self, cwd: Path) -> list[tuple[Path, str]]:
         roots: list[tuple[Path, str]] = []
@@ -404,6 +452,7 @@ class Kernel:
         for base in self._project_ancestors(cwd):
             roots.append((base / ".agents" / "skills", "project"))
             roots.append((base / ".pi" / "skills", "project"))
+            roots.append((base / "skills", "project"))  # ClawHub 默认安装目录
 
         # 3) 用户级路径
         user_roots = [
@@ -455,6 +504,24 @@ class Kernel:
             name = str(args.get("name", "")).strip()
             if not name:
                 return {"error": "缺少参数: name"}
+            # 降级 skill 返回清晰错误
+            status = self._skill_status.get(name)
+            if status == "degraded":
+                skill = self._skills.get(name)
+                result: dict[str, Any] = {
+                    "error": f"skill '{name}' 因缺少依赖被降级，无法使用",
+                    "name": name,
+                }
+                if skill and skill.required_tools:
+                    missing_tools = sorted(set(skill.required_tools) - set(self._tools))
+                    if missing_tools:
+                        result["missing_tools"] = missing_tools
+                if skill and skill.required_bins:
+                    missing_bins = [b for b in skill.required_bins if shutil.which(b) is None]
+                    if missing_bins:
+                        result["missing_bins"] = missing_bins
+                self.emit("skill.invoke", {"name": name, "args": "", "error": result["error"]})
+                return result
             skill_args = str(args.get("args", "")).strip()
             result = invoke_skill(name=name, args=skill_args, skills=self._skills)
             self.emit(
@@ -476,6 +543,29 @@ class Kernel:
             },
             handler=skill_invoke_handler,
         )
+
+        # reload_skills — 重新扫描 skill 目录并更新系统提示词
+        def reload_skills_handler(args: dict) -> dict:
+            return self.reload_skills()
+
+        self.tool(
+            name="reload_skills",
+            description="重新扫描 skill 目录并更新可用技能列表。安装新 skill 后调用此工具使其生效。",
+            parameters={"type": "object", "properties": {}},
+            handler=reload_skills_handler,
+        )
+
+    def reload_skills(self) -> dict[str, Any]:
+        """重新扫描 skill 目录、验证合约、更新系统提示词。"""
+        old_names = set(self._skills)
+        self._load_skills(cwd=self._cwd)
+        self._validate_skills()
+        self._assemble_system_prompt()
+        new_names = set(self._skills)
+        added = sorted(new_names - old_names)
+        removed = sorted(old_names - new_names)
+        self.emit("skills.reloaded", {"added": added, "removed": removed})
+        return {"added": added, "removed": removed, "total": len(self._skills)}
 
     # ── SubAgent 加载 ─────────────────────────────────────────────────────────
 

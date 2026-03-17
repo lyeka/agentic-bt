@@ -1,7 +1,7 @@
 """
 [INPUT]: os, re, html, pathlib, dataclasses, unicodedata, pyyaml
-[OUTPUT]: Skill, load_skills, build_available_skills_prompt, parse_explicit_skill_command, expand_explicit_skill_command, build_skill_payload, invoke_skill
-[POS]: Agent Skills 引擎（发现/解析/验证/注入/显式展开/模型自主调用）
+[OUTPUT]: Skill, load_skills, build_available_skills_prompt, parse_explicit_skill_command, expand_explicit_skill_command, build_skill_payload, invoke_skill, validate_references
+[POS]: Agent Skills 引擎（发现/解析/验证/注入/显式展开/模型自主调用/requires 合约/引用验证）
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -41,6 +41,9 @@ class Skill:
     compatibility: str | None = None
     allowed_tools: str | list[str] | None = None
     metadata: dict[str, str] | None = None
+    required_tools: list[str] | None = None
+    required_bins: list[str] | None = None
+    required_python: list[str] | None = None
 
 
 @dataclass(frozen=True)
@@ -273,6 +276,21 @@ def _parse_skill_file(
             for key, value in metadata.items()
         }
 
+    # requires 合约解析（兼容旧版 required-tools 简写）
+    requires = frontmatter.get("requires")
+    required_tools: list[str] | None = None
+    required_bins: list[str] | None = None
+    required_python: list[str] | None = None
+    if isinstance(requires, dict):
+        required_tools = _as_str_list(requires.get("tools"))
+        required_bins = _as_str_list(requires.get("bins"))
+        required_python = _as_str_list(requires.get("python"))
+    # 旧版简写：required-tools → requires.tools 的替代
+    if required_tools is None:
+        legacy = frontmatter.get("required-tools", frontmatter.get("required_tools"))
+        if legacy is not None:
+            required_tools = _as_str_list(legacy)
+
     return Skill(
         name=name,
         description=description,
@@ -286,6 +304,9 @@ def _parse_skill_file(
         compatibility=_as_optional_str(frontmatter.get("compatibility")),
         allowed_tools=frontmatter.get("allowed-tools"),
         metadata=normalized_metadata,
+        required_tools=required_tools,
+        required_bins=required_bins,
+        required_python=required_python,
     )
 
 
@@ -439,6 +460,48 @@ def _as_optional_str(value: Any) -> str | None:
         stripped = value.strip()
         return stripped or None
     return None
+
+
+def _as_str_list(value: Any) -> list[str] | None:
+    """将标量或列表值归一化为 list[str] | None。"""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return [stripped] if stripped else None
+    if isinstance(value, (list, tuple)):
+        result = [str(item).strip() for item in value if item is not None]
+        return result if result else None
+    return None
+
+
+# ── 引用文件验证 ─────────────────────────────────────────────────────────
+
+_RELATIVE_REF_RE = re.compile(r"\]\(([^)]+)\)")
+
+
+def validate_references(
+    skill: Skill,
+    diagnostics: list[dict[str, str]],
+) -> None:
+    """扫描 skill body 中的相对路径引用，检查文件是否存在。"""
+    try:
+        body = _read_skill_body(skill.file_path)
+    except OSError:
+        return
+    for match in _RELATIVE_REF_RE.finditer(body):
+        ref = match.group(1).strip()
+        if ref.startswith(("http://", "https://", "#", "mailto:")):
+            continue
+        target = skill.base_dir / ref
+        if not target.exists():
+            _diag(
+                diagnostics,
+                code="reference_missing",
+                message=f"引用文件不存在: {ref}",
+                path=str(skill.file_path),
+                name=skill.name,
+            )
 
 
 def _yaml_safe_load(text: str) -> Any:

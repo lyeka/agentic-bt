@@ -1,4 +1,4 @@
-from athenaclaw.skills.discovery import Skill, load_skills
+from athenaclaw.skills.discovery import Skill, load_skills, validate_references
 from athenaclaw.skills.invoke import invoke_skill
 from athenaclaw.skills.prompting import (
     build_available_skills_prompt,
@@ -15,4 +15,5 @@ __all__ = [
     "invoke_skill",
     "load_skills",
     "parse_explicit_skill_command",
+    "validate_references",
 ]

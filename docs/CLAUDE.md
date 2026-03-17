@@ -9,6 +9,7 @@ agent-design.md: **Agent 唯一活文档** — 仿生学设计理念/Kernel-cent
 architecture.md: 架构总览，设计哲学，模块关系图，与现有框架对比
 engine.md: 确定性引擎，数据回放/指标计算/订单撮合/仓位核算/风控拦截
 tools.md: 当前 Agent 工具协议说明，重点覆盖 market_ohlcv 的 interval/mode/start/end 语义、DataStore key 与 compute 配合方式
+skills.md: **Skill 系统完整规格** — 存在论定位/frontmatter 规格/requires 合约/发现机制/双轨调用/热重载/ClawHub 集成/安全模型/关键文件路径
 compute.md: compute 工具现行协议与正确用法，包含 selector 选帧规则、常见误区和安全边界
 memory.md: 文件式记忆系统，工作空间隔离，log/note/recall 工具，受 OpenClaw 启发
 context.md: 上下文工程，六层分层注入，市场数据格式，token 预算管理
