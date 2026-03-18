@@ -33,7 +33,7 @@ class SubAgentDef:
     max_rounds: int = 10
     token_budget: int = 50_000
     timeout_seconds: int = 120
-    temperature: float = 0.0
+    temperature: float | None = None
 
 
 @dataclass
@@ -323,13 +323,13 @@ def _call_llm(
     model: str,
     messages: list,
     tools: list | None,
-    temperature: float,
+    temperature: float | None,
     emit_fn: Callable[[str, Any], None] | None = None,
     agent_name: str | None = None,
     run_id: str | None = None,
     round_num: int | None = None,
 ) -> Any | None:
-    """带 3 次指数退避的 LLM 调用"""
+    """带 3 次指数退避的 LLM 调用（temperature 不兼容时自动降级）"""
     for attempt in range(3):
         try:
             return provider.complete(
@@ -339,6 +339,19 @@ def _call_llm(
                 temperature=temperature,
             )
         except Exception as exc:
+            if "temperature" in str(exc).lower() and temperature is not None:
+                if emit_fn and agent_name and run_id and round_num is not None:
+                    emit_fn("subagent.llm.call.retry", {
+                        "name": agent_name,
+                        "run_id": run_id,
+                        "round": round_num,
+                        "attempt": attempt + 1,
+                        "reason": "temperature_incompatible",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    })
+                temperature = None
+                continue
             if emit_fn and agent_name and run_id and round_num is not None:
                 emit_fn("subagent.llm.call.error", {
                     "name": agent_name,

@@ -4,7 +4,6 @@ description: "Information scout: searches the web for news, events, and fundamen
 max-rounds: 10
 token-budget: 50000
 timeout-seconds: 120
-temperature: 0.1
 tools: [web_search, web_fetch]
 ---
 

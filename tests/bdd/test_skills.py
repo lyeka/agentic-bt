@@ -224,3 +224,45 @@ def then_tool_response_contains(sctx, text):
     tools = [msg for msg in sctx["session"].history if msg.get("role") == "tool"]
     assert tools
     assert any(needle in msg["content"] for msg in tools)
+
+
+def test_skill_invoke_self_evolve_expands_runtime_paths(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    skill_root = tmp_path / "skills"
+    skill_root.mkdir()
+    skill_dir = skill_root / "self-evolve"
+    skill_dir.mkdir()
+    (skill_dir / "SKILL.md").write_text(
+        (
+            "---\n"
+            "name: self-evolve\n"
+            "description: runtime path test\n"
+            "---\n\n"
+            "Read $ATHENACLAW_SOURCE_DIR/CLAUDE.md\n"
+            "Use $ATHENACLAW_WORKSPACE/notebook\n"
+            "Trace at $ATHENACLAW_STATE_DIR/traces/cli/cli.jsonl\n"
+        ),
+        encoding="utf-8",
+    )
+
+    kernel = Kernel(api_key="test")
+    kernel.data.set(
+        "_runtime_paths",
+        {
+            "repo_root": str(tmp_path / "repo"),
+            "workspace_dir": str(workspace),
+            "state_dir": str(tmp_path / "state"),
+        },
+    )
+    kernel.boot(workspace, cwd=workspace, skill_roots=[skill_root])
+
+    result = kernel._tools["skill_invoke"].handler({"name": "self-evolve"})
+
+    payload = json.dumps(result, ensure_ascii=False)
+    assert "$ATHENACLAW_SOURCE_DIR" not in payload
+    assert "$ATHENACLAW_WORKSPACE" not in payload
+    assert "$ATHENACLAW_STATE_DIR" not in payload
+    assert str(tmp_path / "repo" / "CLAUDE.md") in payload
+    assert str(workspace / "notebook") in payload
+    assert "<runtime_paths>" in result["expanded"]

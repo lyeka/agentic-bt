@@ -4,7 +4,6 @@ description: "Quantitative technical analyst: fetches OHLCV data, computes indic
 max-rounds: 8
 token-budget: 40000
 timeout-seconds: 90
-temperature: 0.0
 tools: [market_ohlcv, compute]
 ---
 
