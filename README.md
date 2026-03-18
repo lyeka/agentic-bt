@@ -36,7 +36,31 @@ athenaclaw
 athenaclaw-telegram
 athenaclaw-discord
 athenaclaw-worker
+athenaclaw-harness start     # 监督模式（推荐生产部署）
 ```
+
+## 服务管理 (Harness)
+
+```bash
+athenaclaw-harness start              # 监督模式启动（崩溃自动重启 + 更新后循环）
+athenaclaw-harness status             # 查看版本 + 可用更新 + 运行中的服务
+athenaclaw-harness update             # 更新到最新版本（幂等 + 自动回滚）
+athenaclaw-harness update v1.2.0      # 更新到指定版本
+athenaclaw-harness version            # 显示版本号
+```
+
+详见 [docs/harness.md](docs/harness.md)。
+
+## 自我进化
+
+AthenaClaw 通过 Coder SubAgent + self-evolve Skill 实现自我代码修改：
+
+- **Coder SubAgent** (`.agents/subagents/coder.md`) — 通用代码专家（理解/诊断/修改）
+- **self-evolve Skill** (`.agents/skills/self-evolve.md`) — AthenaClaw 特定规则
+
+Agent 在独立分支上修改代码 → 提 PR → review → merge → `athenaclaw-harness update` 部署。
+
+详见 [docs/self-evolution.md](docs/self-evolution.md)。
 
 ## 运行模型
 
@@ -71,6 +95,7 @@ athenaclaw/
   interfaces/      # CLI / Telegram / Discord / TUI / IM
   integrations/    # market / web provider 集成
   observability/   # trace 写入
+  harness.py       # 服务管理（update/status/start）
 ```
 
 设计原则：

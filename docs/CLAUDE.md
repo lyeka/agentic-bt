@@ -18,5 +18,7 @@ agent-protocol.md: AgentProtocol 接口规范，Decision 数据结构，多种 A
 runner.md: 回测编排器，主循环流程，触发策略，框架驱动记忆时刻，矩阵实验
 tracer.md: Agent 可观测性，trace.jsonl 格式定义，对齐 OTel GenAI Semantic Conventions，观测点注入
 roadmap.md: 开发路线图，MVP 范围定义，V2/V3/V4 演进规划
+harness.md: Harness 服务管理指南 — 启动/更新/部署/监督模式/对话更新/版本管理
+self-evolution.md: 自我进化机制 — Coder SubAgent/self-evolve Skill/PR 工作流/代码质量保障
 
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md

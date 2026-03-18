@@ -166,6 +166,11 @@ class IMDriver:
             # session persist
             chat.bundle.session_store.save(chat.session)
 
+            # harness 更新重启
+            if chat.bundle.kernel.data.get("_restart_requested"):
+                await self._backend.send_text(msg.conversation_id, "正在更新重启...")
+                os._exit(42)
+
             # finalize status
             if chat.status_ref and chat.status_updater:
                 chat.progress.append("done")
