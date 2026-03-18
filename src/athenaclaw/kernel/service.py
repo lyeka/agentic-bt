@@ -164,28 +164,31 @@ AUTOMATION_GUIDE = """\
 
 EVOLUTION_GUIDE = """\
 <evolution>
-你具备自我进化能力——可以理解、诊断和修改自身代码，以及检查更新和重启自身。
+当涉及理解、诊断或修改自身代码时，严格遵循以下规则：
 
-<self-update>
-你可以通过 bash 调用 athenaclaw-harness 管理自身版本:
-  bash: athenaclaw-harness status          — 查看当前版本和可用更新
-  bash: athenaclaw-harness update          — 更新到最新版本
-  bash: athenaclaw-harness update v1.2.0   — 更新到指定版本
-
-更新完成后，通知用户需要重启以应用新代码。
-在 harness 监督模式下（athenaclaw-harness start），重启会自动完成。
-</self-update>
-
-<self-modify>
-修改自身代码时:
-1. 使用 /skill:self-evolve 加载 AthenaClaw 特定规则
-2. 将 skill 内容作为 context 传给 ask_coder
-3. ask_coder 会在独立分支上工作，最终提交 PR
-
-示例: ask_coder(task="添加 RSI 指标工具", context=<self-evolve skill 内容>)
-
-coder 也可以用于理解代码（"turn 方法怎么实现的"）和诊断问题（"这个工具为什么报错"）。
-</self-modify>
+1. 修改自身代码时，必须委派给 ask_coder。不要自己搜索、阅读或编辑源码。
+   coder 是你的代码专家子代理，它懂得怎么找文件、理解架构、写合规代码。
+   你的角色是向 coder 描述任务，然后把结果转达给用户。
+2. 调用 ask_coder 修改自身代码前，先调用 skill_invoke(name="self-evolve")
+   获取 AthenaClaw 的架构规则，将返回内容作为 ask_coder 的 context 参数传入。
+   示例: ask_coder(task="将压缩阈值改为90%", context=<self-evolve 返回内容>)
+3. 理解代码或诊断问题也用 ask_coder，但不需要加载 self-evolve。
+   示例: ask_coder(task="turn 方法的调用链是什么")
+   示例: ask_coder(task="market_ohlcv 工具报错，帮我查原因")
+4. 所有代码修改必须在独立分支上进行，通过 PR 提交。不要直接编辑 working tree。
+   coder 会处理 branch → commit → push → gh pr create 的完整流程。
+5. 检查是否有可用更新:
+   bash: athenaclaw-harness status
+6. 从远端拉取已 merge 的代码并重装:
+   bash: athenaclaw-harness update
+   bash: athenaclaw-harness update v1.2.0
+7. harness update ≠ 应用本地编辑。
+   - harness update: 从 git 远端拉取已 merge 的代码 → pip install → health check
+   - 本地编辑: editable install 模式下，修改 src/ 文件立即生效（下次 import）
+   - 不要在本地 edit 后调 harness update，那是拉远端代码，会覆盖本地修改
+8. 更新完成后如需重启:
+   - harness 监督模式: 进程会自动循环重启
+   - 其他模式: 通知用户手动重启
 </evolution>"""
 
 
@@ -920,11 +923,11 @@ class Kernel:
                 if system_content else []
             )
 
-            # 自动压缩：token > 75% context window 时触发
+            # 自动压缩：token > 85% context window 时触发
             from athenaclaw.llm.context import estimate_tokens, compact_history
 
             est = estimate_tokens(prefix + session.history)
-            if est > int(self.context_window * 0.75):
+            if est > int(self.context_window * 0.85):
                 result = compact_history(
                     provider=self.provider, model=self.model,
                     history=session.history, recent_turns=self.compact_recent_turns,
