@@ -1,6 +1,6 @@
 """
 [INPUT]: json, pathlib, shutil, enum, agent.skills, agent.subagents, agent.messages, agent.providers (LLMProvider/LLMResult/LLMToolCall/OpenAIChatProvider)
-[OUTPUT]: Kernel — 核心协调器（_do_llm_call 统一入口 + _stream_complete 流式 + tool policy + per-turn execution context + skill 合约验证 + 降级事件）；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；skill_invoke
+[OUTPUT]: Kernel — 核心协调器（_do_llm_call 统一入口 + _stream_complete 流式 + tool policy + per-turn execution context + skill 合约验证 + 降级事件）；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；EVOLUTION_GUIDE；skill_invoke
 [POS]: agent 包核心，系统唯一协调中心：ReAct loop + 声明式 wire/emit + DataStore + 权限 + 自举 + Skill Engine + SubAgent System + stream/非 stream 双轨 LLM 调用
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -161,6 +161,32 @@ AUTOMATION_GUIDE = """\
    }
    这会按当前任务定义立即执行一次，不会修改原定时计划。
 </automation_tools>"""
+
+EVOLUTION_GUIDE = """\
+<evolution>
+你具备自我进化能力——可以理解、诊断和修改自身代码，以及检查更新和重启自身。
+
+<self-update>
+你可以通过 bash 调用 athenaclaw-harness 管理自身版本:
+  bash: athenaclaw-harness status          — 查看当前版本和可用更新
+  bash: athenaclaw-harness update          — 更新到最新版本
+  bash: athenaclaw-harness update v1.2.0   — 更新到指定版本
+
+更新完成后，通知用户需要重启以应用新代码。
+在 harness 监督模式下（athenaclaw-harness start），重启会自动完成。
+</self-update>
+
+<self-modify>
+修改自身代码时:
+1. 使用 /skill:self-evolve 加载 AthenaClaw 特定规则
+2. 将 skill 内容作为 context 传给 ask_coder
+3. ask_coder 会在独立分支上工作，最终提交 PR
+
+示例: ask_coder(task="添加 RSI 指标工具", context=<self-evolve skill 内容>)
+
+coder 也可以用于理解代码（"turn 方法怎么实现的"）和诊断问题（"这个工具为什么报错"）。
+</self-modify>
+</evolution>"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -367,7 +393,7 @@ class Kernel:
         else:
             from athenaclaw.kernel.seed import SEED_PROMPT
             identity = SEED_PROMPT
-        parts = [identity, WORKSPACE_GUIDE, AUTOMATION_GUIDE]
+        parts = [identity, WORKSPACE_GUIDE, AUTOMATION_GUIDE, EVOLUTION_GUIDE]
         ready_skills = {
             name: skill
             for name, skill in self._skills.items()
