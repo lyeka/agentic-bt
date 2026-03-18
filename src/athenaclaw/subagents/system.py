@@ -129,7 +129,7 @@ def parse_subagent_file(
         max_rounds=max(1, _as_int(frontmatter.get("max_rounds", frontmatter.get("max-rounds")), 10)),
         token_budget=max(1000, _as_int(frontmatter.get("token_budget", frontmatter.get("token-budget")), 50_000)),
         timeout_seconds=max(1, _as_int(frontmatter.get("timeout_seconds", frontmatter.get("timeout-seconds")), 120)),
-        temperature=max(0.0, min(2.0, _as_float(frontmatter.get("temperature"), 0.0))),
+        temperature=_as_optional_float(frontmatter.get("temperature")),
     )
 
 
@@ -503,6 +503,13 @@ def _as_float(value: Any, default: float) -> float:
         except ValueError:
             pass
     return default
+
+
+def _as_optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    parsed = _as_float(value, 0.0)
+    return max(0.0, min(2.0, parsed))
 
 
 def _diag(

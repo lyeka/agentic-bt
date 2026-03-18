@@ -175,18 +175,23 @@ EVOLUTION_GUIDE = """\
 3. 理解代码或诊断问题也用 ask_coder，但不需要加载 self-evolve。
    示例: ask_coder(task="turn 方法的调用链是什么")
    示例: ask_coder(task="market_ohlcv 工具报错，帮我查原因")
-4. 所有代码修改必须在独立分支上进行，通过 PR 提交。不要直接编辑 working tree。
+4. 当任务是修改其他仓库时，先确认目标仓库位置，再调用 ask_coder。
+   - 用户给了明确本地路径：把绝对路径直接写进 ask_coder 的 task/context，只在该路径下工作
+   - 用户给了明确 git URL 且本地还没有仓库：告诉 coder clone 到 <runtime_paths> 里的 workspace_dir/repos/<repo_name>，再在该目录工作
+   - 用户既没给本地路径，也没给明确 git URL：先向用户提一个简短澄清问题
+   - 不要猜仓库位置，不要让 coder 从 home 根目录全盘搜索
+5. 所有代码修改必须在独立分支上进行，通过 PR 提交。不要直接编辑 working tree。
    coder 会处理 branch → commit → push → gh pr create 的完整流程。
-5. 检查是否有可用更新:
+6. 检查是否有可用更新:
    bash: athenaclaw-harness status
-6. 从远端拉取已 merge 的代码并重装:
+7. 从远端拉取已 merge 的代码并重装:
    bash: athenaclaw-harness update
    bash: athenaclaw-harness update v1.2.0
-7. harness update ≠ 应用本地编辑。
+8. harness update ≠ 应用本地编辑。
    - harness update: 从 git 远端拉取已 merge 的代码 → pip install → health check
    - 本地编辑: editable install 模式下，修改 src/ 文件立即生效（下次 import）
    - 不要在本地 edit 后调 harness update，那是拉远端代码，会覆盖本地修改
-8. 更新完成后如需重启:
+9. 更新完成后如需重启:
    - harness 监督模式: 进程会自动循环重启
    - 其他模式: 通知用户手动重启
 </evolution>"""
@@ -396,7 +401,11 @@ class Kernel:
         else:
             from athenaclaw.kernel.seed import SEED_PROMPT
             identity = SEED_PROMPT
-        parts = [identity, WORKSPACE_GUIDE, AUTOMATION_GUIDE, EVOLUTION_GUIDE]
+        parts = [identity, WORKSPACE_GUIDE, AUTOMATION_GUIDE]
+        runtime_paths_xml = self._runtime_paths_prompt()
+        if runtime_paths_xml:
+            parts.append(runtime_paths_xml)
+        parts.append(EVOLUTION_GUIDE)
         ready_skills = {
             name: skill
             for name, skill in self._skills.items()
@@ -410,6 +419,72 @@ class Kernel:
             if team_xml:
                 parts.append(team_xml)
         self._system_prompt = "\n\n".join(parts)
+
+    def _runtime_paths(self) -> dict[str, str]:
+        raw = self.data.get("_runtime_paths")
+        paths: dict[str, str] = {}
+        if isinstance(raw, dict):
+            for key, value in raw.items():
+                text = str(value or "").strip()
+                if text:
+                    paths[key] = text
+        if "workspace_dir" not in paths and self._workspace is not None:
+            paths["workspace_dir"] = str(self._workspace.resolve())
+        if "state_dir" not in paths:
+            state_dir = os.getenv("ATHENACLAW_STATE_DIR")
+            if state_dir:
+                paths["state_dir"] = str(Path(state_dir).expanduser().resolve())
+        if "repo_root" not in paths:
+            repo_root = os.getenv("ATHENACLAW_SOURCE_DIR")
+            if repo_root:
+                paths["repo_root"] = str(Path(repo_root).expanduser().resolve())
+            elif hasattr(self, "_cwd"):
+                git_root = self._find_git_root(self._cwd.resolve())
+                if git_root is not None:
+                    paths["repo_root"] = str(git_root)
+        return paths
+
+    def _runtime_paths_prompt(self) -> str:
+        paths = self._runtime_paths()
+        if not paths:
+            return ""
+        lines = ["<runtime_paths>"]
+        for key in ("repo_root", "workspace_dir", "state_dir"):
+            value = paths.get(key)
+            if value:
+                lines.append(f"{key}: {value}")
+        lines.append("</runtime_paths>")
+        return "\n".join(lines)
+
+    def _expand_runtime_placeholders(self, text: str) -> str:
+        result = str(text or "")
+        paths = self._runtime_paths()
+        replacements = {
+            "$ATHENACLAW_SOURCE_DIR": paths.get("repo_root", ""),
+            "$ATHENACLAW_WORKSPACE": paths.get("workspace_dir", ""),
+            "$ATHENACLAW_STATE_DIR": paths.get("state_dir", ""),
+        }
+        for placeholder, value in replacements.items():
+            if value:
+                result = result.replace(placeholder, value)
+        return result
+
+    def _decorate_skill_invoke_result(self, name: str, result: dict[str, Any]) -> dict[str, Any]:
+        if name != "self-evolve":
+            return result
+        note = self._runtime_paths_prompt()
+        body = self._expand_runtime_placeholders(str(result.get("body", "")))
+        expanded = self._expand_runtime_placeholders(str(result.get("expanded", "")))
+        if note:
+            reminder = (
+                "Use these absolute paths instead of raw $ATHENACLAW_* placeholders "
+                "when reading, editing, or cloning repositories."
+            )
+            body = f"{body}\n\n{note}\n{reminder}"
+            expanded = f"{expanded}\n\n{note}\n{reminder}"
+        result["body"] = body
+        result["expanded"] = expanded
+        return result
 
     def _load_skills(self, cwd: Path, skill_roots: list[Path] | None = None) -> None:
         roots: list[tuple[Path, str]]
@@ -553,6 +628,8 @@ class Kernel:
                 return result
             skill_args = str(args.get("args", "")).strip()
             result = invoke_skill(name=name, args=skill_args, skills=self._skills)
+            if "error" not in result:
+                result = self._decorate_skill_invoke_result(name, result)
             self.emit(
                 "skill.invoke",
                 {"name": name, "args": skill_args, "error": result.get("error")},

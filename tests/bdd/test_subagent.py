@@ -781,3 +781,51 @@ def test_run_subagent_emits_llm_call_error_details_after_retries():
     assert all(evt["error_type"] == "RuntimeError" for evt in error_events)
     assert all("provider 400" in evt["error"] for evt in error_events)
     assert result.response == "[error] LLM 调用失败"
+
+
+def test_parse_subagent_file_defaults_temperature_to_none(tmp_path):
+    diagnostics: list[dict[str, str]] = []
+    file_path = tmp_path / "coder.md"
+    file_path.write_text(
+        "---\nname: coder\ndescription: test coder\n---\n\nBody.\n",
+        encoding="utf-8",
+    )
+
+    defn = parse_subagent_file(file_path, "test", diagnostics)
+
+    assert defn is not None
+    assert defn.temperature is None
+
+
+def test_run_subagent_retries_without_temperature_and_emits_retry_event():
+    mock_client = MagicMock()
+    calls: list[dict] = []
+
+    def _create(**kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("invalid temperature: only 1 is allowed for this model")
+        return _mock_response("stop", content="ok")
+
+    mock_client.chat.completions.create.side_effect = _create
+    events: list[tuple[str, dict]] = []
+
+    result = run_subagent(
+        definition=_simple_defn("tracey", temperature=0.0),
+        task="inspect",
+        client=mock_client,
+        model="test-model",
+        tool_schemas=[],
+        tool_executor=lambda n, a: {"ok": True},
+        emit_fn=lambda event, data: events.append((event, data)),
+    )
+
+    retry_events = [data for event, data in events if event == "subagent.llm.call.retry"]
+    error_events = [data for event, data in events if event == "subagent.llm.call.error"]
+
+    assert len(retry_events) == 1
+    assert retry_events[0]["reason"] == "temperature_incompatible"
+    assert error_events == []
+    assert calls[0]["temperature"] == 0.0
+    assert "temperature" not in calls[1]
+    assert result.response == "ok"

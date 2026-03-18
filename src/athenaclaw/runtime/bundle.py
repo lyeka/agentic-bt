@@ -23,6 +23,31 @@ from athenaclaw.tools import bash, compute, edit, market, portfolio, read, watch
 from athenaclaw.subagents import SubAgentDef
 
 
+def _detect_repo_root(cwd: Path) -> Path:
+    env_root = os.getenv("ATHENACLAW_SOURCE_DIR")
+    if env_root:
+        return Path(env_root).expanduser().resolve()
+
+    source_root = Path(__file__).resolve().parents[3]
+    current = source_root
+    while True:
+        if (current / ".git").exists():
+            return current
+        if current.parent == current:
+            break
+        current = current.parent
+
+    current = cwd.resolve()
+    while True:
+        if (current / ".git").exists():
+            return current
+        if current.parent == current:
+            break
+        current = current.parent
+
+    return source_root
+
+
 @dataclass(frozen=True)
 class AgentConfig:
     model: str
@@ -225,10 +250,19 @@ def build_kernel_bundle(
         api_key=config.api_key,
         image_detail=config.image_detail,
     )
+    repo_root = _detect_repo_root(cwd)
     kernel = Kernel(
         model=config.model,
         provider=provider,
         context_window=config.context_window, compact_recent_turns=config.compact_recent_turns,
+    )
+    kernel.data.set(
+        "_runtime_paths",
+        {
+            "repo_root": str(repo_root),
+            "workspace_dir": str(workspace),
+            "state_dir": str(state),
+        },
     )
 
     # ── market 工具（显式声明数据源）──
@@ -305,7 +339,7 @@ def build_kernel_bundle(
     kernel.permission("__external__", Permission.USER_CONFIRM)
 
     # boot (skills + subagents + system prompt)
-    kernel.boot(workspace)
+    kernel.boot(workspace, cwd=repo_root)
 
     # 程序化注册的 subagents
     if config.subagents:

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -167,7 +168,8 @@ class IMDriver:
             chat.bundle.session_store.save(chat.session)
 
             # harness 更新重启
-            if chat.bundle.kernel.data.get("_restart_requested"):
+            kernel_data = getattr(chat.bundle.kernel, "data", None)
+            if kernel_data is not None and callable(getattr(kernel_data, "get", None)) and kernel_data.get("_restart_requested"):
                 await self._backend.send_text(msg.conversation_id, "正在更新重启...")
                 os._exit(42)
 
