@@ -1,17 +1,17 @@
 """
-[INPUT]: subprocess, sys, os, argparse, pathlib, json, importlib.metadata
-[OUTPUT]: main — athenaclaw-harness CLI 入口（update/status/version/start 子命令）
-[POS]: 进程生命周期管理层：幂等更新 + 自动回滚 + 健康检查 + 服务检测 + 监督模式
+[INPUT]: subprocess, sys, os, time, argparse, pathlib, importlib.metadata
+[OUTPUT]: main — athenaclaw-harness CLI 入口（update/status/version/start 子命令，支持多服务并行监督）
+[POS]: 进程生命周期管理层：幂等更新 + 自动回滚 + 健康检查 + 服务检测 + 多服务监督模式
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 
@@ -242,30 +242,87 @@ def cmd_version() -> None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 子命令: start (监督模式)
+# 服务注册表
 # ─────────────────────────────────────────────────────────────────────────────
 
-def cmd_start(agent_args: list[str]) -> None:
-    """while-loop 监督: 启动 agent → exit 42 时 update → 重启。"""
-    print(f"[harness] supervised start — install_dir={_install_dir()}")
-    while True:
-        cmd = [sys.executable, "-m", "athenaclaw.interfaces.cli"] + agent_args
-        print(f"[harness] starting agent...")
-        code = subprocess.call(cmd)
+_SERVICES = {
+    "cli": "athenaclaw.interfaces.cli",
+    "telegram": "athenaclaw.interfaces.telegram",
+    "discord": "athenaclaw.interfaces.discord",
+    "worker": "athenaclaw.automation.worker",
+}
 
-        if code == 0:
-            print("[harness] agent exited normally")
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 子命令: start (监督模式，支持多服务)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def cmd_start(services: list[str], extra_args: list[str]) -> None:
+    """
+    监督模式启动一个或多个服务。
+    任一服务 exit 42 → 全部停止 → update → 全部重启。
+    """
+    if not services:
+        services = ["cli"]
+
+    modules = []
+    for name in services:
+        mod = _SERVICES.get(name)
+        if not mod:
+            print(f"[harness] unknown service: {name}")
+            print(f"[harness] available: {', '.join(_SERVICES)}")
+            sys.exit(1)
+        modules.append((name, mod))
+
+    print(f"[harness] supervised start — services: {', '.join(services)}")
+    print(f"[harness] install_dir={_install_dir()}")
+
+    while True:
+        procs: dict[str, subprocess.Popen] = {}
+        for name, mod in modules:
+            cmd = [sys.executable, "-m", mod] + extra_args
+            print(f"[harness] starting {name}...")
+            procs[name] = subprocess.Popen(cmd)
+
+        # 等待任一进程退出
+        update_requested = False
+        while procs:
+            for name, proc in list(procs.items()):
+                code = proc.poll()
+                if code is None:
+                    continue
+                del procs[name]
+                if code == EXIT_UPDATE:
+                    print(f"[harness] {name} requested update+restart")
+                    update_requested = True
+                elif code == 0:
+                    print(f"[harness] {name} exited normally")
+                else:
+                    print(f"[harness] {name} exited with code {code}")
+
+                # 任一服务退出 → 停止其余
+                if procs:
+                    print(f"[harness] stopping remaining services...")
+                    for other_name, other_proc in procs.items():
+                        other_proc.terminate()
+                    for other_name, other_proc in procs.items():
+                        try:
+                            other_proc.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            other_proc.kill()
+                    procs.clear()
+                break
+            else:
+                time.sleep(0.5)
+
+        if not update_requested:
             break
-        elif code == EXIT_UPDATE:
-            print("[harness] agent requested update+restart")
-            result = cmd_update()
-            if result["status"] != "ok":
-                print("[harness] update failed, stopping")
-                sys.exit(1)
-            continue
-        else:
-            print(f"[harness] agent exited with code {code}")
-            break
+
+        result = cmd_update()
+        if result["status"] != "ok":
+            print("[harness] update failed, stopping")
+            sys.exit(1)
+        print("[harness] restarting all services...")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -290,8 +347,19 @@ def main() -> None:
     sub.add_parser("version", help="Show version number")
 
     # start
-    p_start = sub.add_parser("start", help="Start agent in supervised mode")
-    p_start.add_argument("agent_args", nargs="*", default=[])
+    p_start = sub.add_parser(
+        "start",
+        help="Start services in supervised mode",
+        epilog=f"Available services: {', '.join(_SERVICES)}",
+    )
+    p_start.add_argument(
+        "services", nargs="*", default=[],
+        help="Services to start (default: cli). Example: cli discord worker",
+    )
+    p_start.add_argument(
+        "--args", dest="extra_args", nargs="*", default=[],
+        help="Extra args passed to all services (e.g. --args --simple)",
+    )
 
     args = parser.parse_args()
 
@@ -303,7 +371,7 @@ def main() -> None:
     elif args.command == "version":
         cmd_version()
     elif args.command == "start":
-        cmd_start(args.agent_args)
+        cmd_start(args.services, args.extra_args)
     else:
         parser.print_help()
         sys.exit(1)

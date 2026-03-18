@@ -42,7 +42,9 @@ athenaclaw-harness start     # 监督模式（推荐生产部署）
 ## 服务管理 (Harness)
 
 ```bash
-athenaclaw-harness start              # 监督模式启动（崩溃自动重启 + 更新后循环）
+athenaclaw-harness start              # 监督模式启动 CLI（默认）
+athenaclaw-harness start discord      # 启动 Discord bot
+athenaclaw-harness start discord worker  # Discord + Worker 并行
 athenaclaw-harness status             # 查看版本 + 可用更新 + 运行中的服务
 athenaclaw-harness update             # 更新到最新版本（幂等 + 自动回滚）
 athenaclaw-harness update v1.2.0      # 更新到指定版本
