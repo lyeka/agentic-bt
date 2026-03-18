@@ -1,11 +1,12 @@
 """
-[INPUT]: dotenv, athenaclaw.runtime, athenaclaw.interfaces.tui
-[OUTPUT]: main — CLI 入口（使用 runtime 统一组装 Kernel；默认启动 TUI，--simple 回退纯文本 REPL）
+[INPUT]: dotenv, signal, athenaclaw.runtime, athenaclaw.interfaces.tui
+[OUTPUT]: main — CLI 入口（使用 runtime 统一组装 Kernel；默认启动 TUI，--simple 回退纯文本 REPL；支持 exit(42) 触发 harness 更新重启）
 [POS]: 用户交互通道入口；启动逻辑（config/bundle/session）在此，展示层委托给 tui/
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
 import os
+import signal
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -144,6 +145,11 @@ def _simple_repl(
         # 每轮自动保存（防崩溃丢失）
         store.save(session)
 
+        # harness 更新重启
+        if kernel.data.get("_restart_requested"):
+            print("[harness] 正在触发更新重启...")
+            sys.exit(42)
+
 
 def _run_simple(config: AgentConfig, bundle: Any) -> None:
     """--simple 模式：纯文本 REPL。"""
@@ -176,6 +182,13 @@ def _run_simple(config: AgentConfig, bundle: Any) -> None:
 def main() -> None:
     """CLI 入口 — 默认 TUI，--simple 回退纯文本。"""
     config, bundle = _build()
+
+    # SIGUSR1: harness 外部触发更新
+    def _on_update_signal(signum, frame):
+        bundle.kernel.data.set("_restart_requested", True)
+
+    if hasattr(signal, "SIGUSR1"):
+        signal.signal(signal.SIGUSR1, _on_update_signal)
 
     if "--simple" in sys.argv:
         _run_simple(config, bundle)

@@ -158,6 +158,11 @@ class InvestmentApp(App):
         self.bundle.session_store.save(self.session)
         self._refresh_sidebar()
 
+        # harness 更新重启
+        if self.bundle.kernel.data.get("_restart_requested"):
+            self.notify("正在触发更新重启...")
+            self.exit(return_code=42)
+
     def _on_error(self, msg: str) -> None:
         self._clear_thinking()
         if self._streaming_widget:
