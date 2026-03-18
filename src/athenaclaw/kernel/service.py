@@ -1000,11 +1000,11 @@ class Kernel:
                 if system_content else []
             )
 
-            # 自动压缩：token > 85% context window 时触发
+            # 自动压缩：token > 90% context window 时触发
             from athenaclaw.llm.context import estimate_tokens, compact_history
 
             est = estimate_tokens(prefix + session.history)
-            if est > int(self.context_window * 0.85):
+            if est > int(self.context_window * 0.90):
                 result = compact_history(
                     provider=self.provider, model=self.model,
                     history=session.history, recent_turns=self.compact_recent_turns,
