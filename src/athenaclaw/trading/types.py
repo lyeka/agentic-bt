@@ -212,12 +212,16 @@ class TradePreview:
     warnings: tuple[str, ...] = ()
     max_buy: float | None = None
     max_sell: float | None = None
+    normalized_limit_price: float | None = None
+    normalization_reason: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "warnings": list(self.warnings),
             "max_buy": self.max_buy,
             "max_sell": self.max_sell,
+            "normalized_limit_price": self.normalized_limit_price,
+            "normalization_reason": self.normalization_reason,
         }
 
 
@@ -230,6 +234,7 @@ class TradePlan:
     warnings: tuple[str, ...]
     created_at: str
     expires_at: str
+    normalized_intent: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -240,6 +245,7 @@ class TradePlan:
             "warnings": list(self.warnings),
             "created_at": self.created_at,
             "expires_at": self.expires_at,
+            "normalized_intent": self.normalized_intent,
             "requires_confirmation": True,
         }
 
@@ -263,6 +269,8 @@ class TradeApplyResult:
     receipt: TradeReceipt | None
     order_status: TradeOrderSnapshot | None
     account_snapshot: TradeAccountSnapshot | None
+    finalized: bool = False
+    warnings: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -272,4 +280,6 @@ class TradeApplyResult:
             "receipt": self.receipt.to_dict() if self.receipt else None,
             "order_status": self.order_status.to_dict() if self.order_status else None,
             "account_snapshot": self.account_snapshot.to_dict() if self.account_snapshot else None,
+            "finalized": self.finalized,
+            "warnings": list(self.warnings),
         }

@@ -33,6 +33,9 @@ class _FakeManager:
     def trade_context(self):
         return self._context
 
+    def quote_context(self):
+        return self._context
+
 
 class _ListAccountsContext:
     def get_acc_list(self):
@@ -175,12 +178,14 @@ def test_futu_preview_returns_soft_warning_and_limits(monkeypatch):
         symbol="AAPL",
         side="buy",
         quantity=1,
-        limit_price=180.0,
+        limit_price=174.034,
     )
 
     preview = adapter.preview_limit_order(intent)
 
     assert preview is not None
     assert preview.max_buy == 5.0
-    assert tuple(preview.warnings) == ("provider session=RTH",)
+    assert tuple(preview.warnings) == ("order_session=RTH",)
+    assert preview.normalized_limit_price == 174.03
+    assert preview.normalization_reason == "fallback_us_default"
     assert context.preview_calls == 1

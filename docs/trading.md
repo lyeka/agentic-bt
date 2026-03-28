@@ -122,6 +122,13 @@ canonical 标识：
 
 这三类引用都是系统生成的 opaque string。LLM 只能传递，不能猜测、拼接或修改。
 
+显式参数原则：
+
+- 不做自动承接最近账户
+- 不做自动承接最近订单
+- 不做 `suggested_account_ref` / `suggested_order_ref`
+- 查询具体账户或订单时，必须显式携带对应 ref
+
 canonical 状态只保留：
 
 - `submitted`
@@ -132,6 +139,13 @@ canonical 状态只保留：
 - `rejected`
 - `expired`
 - `unknown`
+
+补充结果语义：
+
+- `TradePreview` 可以返回 `normalized_limit_price` 与 `normalization_reason`
+- `TradePlan` 可以返回 `normalized_intent`
+- `TradeApplyResult` 返回 `finalized` 与 `warnings`
+- `status=ok` 只表示工具执行成功；业务上是否已进入终态，要看 `finalized + order_status`
 
 ## 5. 工具协议
 
@@ -156,6 +170,7 @@ canonical 状态只保留：
 - tool 不得直连 adapter 的 mutating 方法
 - `Kernel.data["account"]` 在 V1 里只表示“当前活动账户快照”
 - `trade_account.list_accounts` 必须返回足够的账户能力信息，让用户和 Agent 在不打开券商客户端的前提下也能判断哪个账户支持目标市场
+- 缺少 `account_ref` / `order_ref` 时返回 `missing_*` 错误，不做隐式补参
 
 ## 6. Prompt 与安全
 
@@ -166,7 +181,9 @@ canonical 状态只保留：
 - V1 只支持限价单
 - `portfolio` 不是远端 broker 账户
 - 下单前先看 `trade_account.list_accounts` 里的 `supported_markets`、`account_status`、`account_kind`；`extra` 可用于解释 provider 特有限制
+- 查询具体账户或订单时必须显式携带 `account_ref` / `order_ref`
 - 在 `trade_apply` 成功前，不能宣称“已提交/已成交”
+- 没有同 broker 的新鲜行情或明确 market-state 证据时，不得推断“更容易成交”“当前处于常规交易时段”
 - broker 交易不会自动改写 `portfolio.json`
 
 这些规则在 prompt 中做引导，但最终安全边界在代码里执行，不依赖 LLM 自觉遵守。
@@ -190,11 +207,13 @@ Futu 作为首个 provider，只接证券账户交易。
 - `modify_order(ModifyOrderOp.CANCEL)` -> `cancel_order`
 - `accinfo_query` -> `get_account_summary`
 - `acctradinginfo_query` -> `preview_limit_order`
+- `get_market_snapshot(price_spread)` -> provider 内部价格合法化辅助，不暴露为公共工具
 
 Futu 账户发现不做 provider 侧隐式过滤；仍返回全部账户。选户正确性由两层保障：
 
 - `list_accounts` 直接暴露账户能力与 `extra`
-- `trade_plan.submit_limit` 通过 `preview_limit_order` 在 plan 阶段前置拦截“不支持该市场/账户已失效/账户类型不适合/最大可买卖不足”等硬失败
+- `trade_plan.submit_limit` 在 plan 阶段先做价格规范化，再通过 `preview_limit_order` 前置拦截“不支持该市场/账户已失效/账户类型不适合/最大可买卖不足”等硬失败
+- `trade_apply(cancel)` 会在内部做短时、有界的状态确认；若短时内未进入终态，返回 `finalized=false`，而不是假装已经撤单成功
 
 V1 不做：
 
@@ -250,3 +269,5 @@ V1 不做：
 - 模拟账户可完成限价单下单、查状态、撤单
 - 成交后 `compute` 能读取最新 `account`
 - 自动化任务不能执行 `trade_plan` / `trade_apply`
+- 缺少 ref 时返回 `missing_*`，而不是 `invalid_*`
+- 不在陈旧行情或弱提示上推断成交概率或当前市场状态

@@ -17,6 +17,8 @@ class TradeErrorCode(str, Enum):
     ACCOUNT_NOT_FOUND = "account_not_found"
     ACCOUNT_MARKET_UNSUPPORTED = "account_market_unsupported"
     ACCOUNT_INACTIVE = "account_inactive"
+    MISSING_ACCOUNT_REF = "missing_account_ref"
+    MISSING_ORDER_REF = "missing_order_ref"
     ORDER_NOT_FOUND = "order_not_found"
     ORDER_NOT_CANCELLABLE = "order_not_cancellable"
     PLAN_NOT_FOUND = "plan_not_found"

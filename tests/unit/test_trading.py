@@ -42,6 +42,10 @@ class _FakeTradeAdapter:
         self._submitted = False
         self.preview_calls = 0
         self.preview_error: TradeError | None = None
+        self.preview_normalized_limit_price: float | None = None
+        self.preview_normalization_reason: str | None = None
+        self.order_status_sequence: list[str] | None = None
+        self._order_status_reads = 0
 
     def capabilities(self) -> TradeCapabilities:
         return TradeCapabilities(
@@ -75,6 +79,9 @@ class _FakeTradeAdapter:
         assert account_ref == self.account_ref
         if not self._submitted:
             return []
+        status = self._current_order_status()
+        if status in {"filled", "cancelled", "rejected", "expired"}:
+            return []
         return [
             TradeOpenOrder(
                 order_ref=self.order_ref,
@@ -82,30 +89,34 @@ class _FakeTradeAdapter:
                 symbol="AAPL",
                 side="buy",
                 quantity=10,
-                filled_quantity=0,
+                filled_quantity=10 if status == "filled" else 0,
                 limit_price=180.0,
-                status="submitted",
+                status=status,
                 submitted_at="2026-03-28T00:00:00+00:00",
             )
         ]
 
     def get_order_status(self, order_ref: str):
         assert order_ref == self.order_ref
+        status = self._current_order_status()
+        self._order_status_reads += 1
         return TradeOrderSnapshot(
             order_ref=self.order_ref,
             account_ref=self.account_ref,
             symbol="AAPL",
             side="buy",
             quantity=10,
-            filled_quantity=10 if self._submitted else 0,
+            filled_quantity=10 if status == "filled" else 0,
             limit_price=180.0,
-            status="filled" if self._submitted else "submitted",
+            status=status,
             submitted_at="2026-03-28T00:00:00+00:00",
             updated_at="2026-03-28T00:00:05+00:00",
         )
 
     def submit_limit_order(self, intent: SubmitLimitOrderIntent):
         assert intent.account_ref == self.account_ref
+        if self.preview_normalized_limit_price is not None:
+            assert intent.limit_price == self.preview_normalized_limit_price
         self._submitted = True
         return TradeReceipt(
             order_ref=self.order_ref,
@@ -115,7 +126,13 @@ class _FakeTradeAdapter:
         )
 
     def cancel_order(self, order_ref: str):
-        raise AssertionError("cancel_order should not be called in this test")
+        assert order_ref == self.order_ref
+        return TradeReceipt(
+            order_ref=self.order_ref,
+            status="unknown",
+            submitted_at="2026-03-28T00:00:01+00:00",
+            broker_order_id="9001",
+        )
 
     def get_account_summary(self, account_ref: str):
         assert account_ref == self.account_ref
@@ -131,7 +148,19 @@ class _FakeTradeAdapter:
         self.preview_calls += 1
         if self.preview_error is not None:
             raise self.preview_error
-        return TradePreview(warnings=("preview-ok",), max_buy=100.0, max_sell=0.0)
+        return TradePreview(
+            warnings=("order_session=RTH",),
+            max_buy=100.0,
+            max_sell=0.0,
+            normalized_limit_price=self.preview_normalized_limit_price or intent.limit_price,
+            normalization_reason=self.preview_normalization_reason,
+        )
+
+    def _current_order_status(self) -> str:
+        if self.order_status_sequence:
+            index = min(self._order_status_reads, len(self.order_status_sequence) - 1)
+            return self.order_status_sequence[index]
+        return "filled" if self._submitted else "submitted"
 
 
 def _make_orchestrator(tmp_path: Path) -> tuple[TradeOrchestrator, _FakeTradeAdapter]:
@@ -140,27 +169,34 @@ def _make_orchestrator(tmp_path: Path) -> tuple[TradeOrchestrator, _FakeTradeAda
         adapter=adapter,
         plan_store=TradePlanStore(tmp_path / "state"),
         audit_log=TradeAuditLog(tmp_path / "state"),
+        cancel_confirm_delays=(0.0, 0.0, 0.0),
     )
     return orchestrator, adapter
 
 
 def test_trade_orchestrator_plan_and_apply_submit_limit(tmp_path):
     orchestrator, adapter = _make_orchestrator(tmp_path)
+    adapter.preview_normalized_limit_price = 174.03
+    adapter.preview_normalization_reason = "fallback_us_default"
 
     plan = orchestrator.plan_submit_limit(
         account_ref=adapter.account_ref,
         symbol="AAPL",
         side="buy",
         quantity=10,
-        limit_price=180,
+        limit_price=174.034,
     )
 
     assert adapter.preview_calls == 1
-    assert tuple(plan.warnings) == ("preview-ok",)
+    assert plan.normalized_intent is not None
+    assert plan.normalized_intent["limit_price"] == 174.03
+    assert "normalized from 174.034 to 174.03" in plan.warnings[0]
+    assert tuple(plan.warnings[1:]) == ("order_session=RTH",)
 
     result = orchestrator.apply(plan.plan_id)
 
     assert result.operation == "submit_limit"
+    assert result.finalized is True
     assert result.order_status is not None
     assert result.order_status.status == "filled"
     assert result.account_snapshot is not None
@@ -243,6 +279,37 @@ def test_trade_tools_inject_active_account_snapshot(tmp_path):
     assert kernel.data.get("trade:last_result")["plan_id"] == plan["plan_id"]
 
 
+def test_trade_tools_missing_refs_return_missing_error_codes(tmp_path):
+    orchestrator, _adapter = _make_orchestrator(tmp_path)
+    kernel = Kernel(api_key="test")
+    register_trade_tools(kernel, orchestrator)
+
+    open_orders = kernel._tools["trade_account"].handler({"action": "get_open_orders"})
+    assert open_orders["error_code"] == "missing_account_ref"
+
+    order_status = kernel._tools["trade_account"].handler({"action": "get_order_status"})
+    assert order_status["error_code"] == "missing_order_ref"
+
+    cancel_plan = kernel._tools["trade_plan"].handler({"operation": "cancel"})
+    assert cancel_plan["error_code"] == "missing_order_ref"
+
+
+def test_trade_orchestrator_cancel_non_finalized_returns_warning(tmp_path):
+    orchestrator, adapter = _make_orchestrator(tmp_path)
+    adapter._submitted = True
+    adapter.order_status_sequence = ["submitted", "submitted", "submitted", "submitted"]
+
+    plan = orchestrator.plan_cancel(order_ref=adapter.order_ref)
+    result = orchestrator.apply(plan.plan_id)
+
+    assert result.operation == "cancel"
+    assert result.finalized is False
+    assert tuple(result.warnings) == ("cancel_requested_not_finalized",)
+    assert result.order_status is not None
+    assert result.order_status.status == "submitted"
+    assert "撤单请求已发送" in result.result_summary
+
+
 def test_trade_account_list_accounts_exposes_account_capabilities_and_extra(tmp_path):
     orchestrator, adapter = _make_orchestrator(tmp_path)
     kernel = Kernel(api_key="test")
@@ -269,6 +336,8 @@ def test_trade_guide_injected_when_trade_tools_registered(tmp_path):
     assert "<trade_tools>" in kernel._system_prompt
     assert "trade_apply" in kernel._system_prompt
     assert "portfolio.json" in kernel._system_prompt
+    assert "必须显式携带 account_ref 或 order_ref" in kernel._system_prompt
+    assert "不能理解为当前市场状态" in kernel._system_prompt
 
 
 def test_automation_policy_denies_trade_mutations(tmp_path):

@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -199,8 +200,9 @@ class FutuTradeAdapter:
         futu = _load_futu()
         ctx = self._manager.trade_context()
         side = futu.TrdSide.BUY if intent.side == "buy" else futu.TrdSide.SELL
+        normalized_price, _reason = self._normalize_limit_price(intent.symbol, intent.limit_price)
         ret, data = ctx.place_order(
-            price=float(intent.limit_price),
+            price=normalized_price,
             qty=intent.quantity,
             code=to_futu_code(intent.symbol),
             trd_side=side,
@@ -276,10 +278,11 @@ class FutuTradeAdapter:
 
         futu = _load_futu()
         ctx = self._manager.trade_context()
+        normalized_price, normalization_reason = self._normalize_limit_price(intent.symbol, intent.limit_price)
         ret, data = ctx.acctradinginfo_query(
             order_type=futu.OrderType.NORMAL,
             code=to_futu_code(intent.symbol),
-            price=float(intent.limit_price),
+            price=normalized_price,
             trd_env=_trd_env(account["env"]),
             acc_id=int(account["account_id"]),
         )
@@ -320,8 +323,14 @@ class FutuTradeAdapter:
         warnings: list[str] = []
         session = _string_or_none(_col(row, "session"))
         if session and session.upper() not in {"N/A", "NONE"}:
-            warnings.append(f"provider session={session}")
-        return TradePreview(warnings=tuple(warnings), max_buy=max_buy, max_sell=max_sell)
+            warnings.append(f"order_session={session}")
+        return TradePreview(
+            warnings=tuple(warnings),
+            max_buy=max_buy,
+            max_sell=max_sell,
+            normalized_limit_price=normalized_price,
+            normalization_reason=normalization_reason,
+        )
 
     def _find_account(self, account_ref: str) -> TradeAccountDescriptor | None:
         for item in self.list_accounts():
@@ -362,6 +371,57 @@ class FutuTradeAdapter:
                     "account_kind": descriptor.account_kind,
                 },
             )
+
+    def _normalize_limit_price(self, symbol: str, raw_price: float) -> tuple[float, str | None]:
+        try:
+            value = Decimal(str(raw_price))
+        except (InvalidOperation, ValueError) as exc:
+            raise TradeError(TradeErrorCode.INVALID_PRICE, f"非法价格: {raw_price!r}") from exc
+
+        if value <= 0:
+            raise TradeError(TradeErrorCode.INVALID_PRICE, "limit_price 必须大于 0")
+
+        increment, source = self._price_increment(symbol, value)
+        normalized = _snap_to_increment(value, increment)
+        reason = source if normalized != value or source.startswith("fallback") else None
+        return float(normalized), reason
+
+    def _price_increment(self, symbol: str, value: Decimal) -> tuple[Decimal, str]:
+        snapshot_increment = self._price_increment_from_snapshot(symbol)
+        if snapshot_increment is not None:
+            return snapshot_increment, "market_snapshot_price_spread"
+
+        code = to_futu_code(symbol)
+        if code.startswith("US."):
+            if value < Decimal("1"):
+                return Decimal("0.0001"), "fallback_us_sub_dollar"
+            return Decimal("0.01"), "fallback_us_default"
+        if code.startswith(("SH.", "SZ.", "BJ.")):
+            return Decimal("0.01"), "fallback_cn_default"
+        return Decimal("0.001"), "fallback_security_precision"
+
+    def _price_increment_from_snapshot(self, symbol: str) -> Decimal | None:
+        if not hasattr(self._manager, "quote_context"):
+            return None
+        try:
+            quote_ctx = self._manager.quote_context()
+            ret, data = quote_ctx.get_market_snapshot([to_futu_code(symbol)])
+            df = self._ensure_frame(ret, data, "get_market_snapshot", allow_empty=True)
+        except Exception:
+            return None
+        if df.empty:
+            return None
+        row = df.iloc[0]
+        spread = _col(row, "price_spread")
+        if spread is None:
+            return None
+        try:
+            value = Decimal(str(spread))
+        except (InvalidOperation, ValueError):
+            return None
+        if value <= 0:
+            return None
+        return value
 
     @staticmethod
     def _ensure_frame(ret: int, data: Any, op: str, *, allow_empty: bool = False) -> pd.DataFrame:
@@ -546,6 +606,8 @@ def _translate_error_code(text: str, *, op: str) -> TradeErrorCode:
     lowered = text.lower()
     if "unlock" in lowered:
         return TradeErrorCode.TRADE_LOCKED
+    if "价格参数精度" in text or "price precision" in lowered:
+        return TradeErrorCode.INVALID_PRICE
     if "不支持交易" in text or "not support" in lowered:
         return TradeErrorCode.ACCOUNT_MARKET_UNSUPPORTED
     if "disabled" in lowered or "失效" in text:
@@ -553,3 +615,10 @@ def _translate_error_code(text: str, *, op: str) -> TradeErrorCode:
     if op == "acctradinginfo_query":
         return TradeErrorCode.PREVIEW_REJECTED
     return TradeErrorCode.PROVIDER_ERROR
+
+
+def _snap_to_increment(value: Decimal, increment: Decimal) -> Decimal:
+    if increment <= 0:
+        return value
+    units = (value / increment).quantize(Decimal("1"), rounding=ROUND_HALF_UP)
+    return (units * increment).quantize(increment, rounding=ROUND_HALF_UP)

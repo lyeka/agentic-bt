@@ -14,6 +14,7 @@ class FutuClientManager:
     def __init__(self, config) -> None:
         self._config = config
         self._trade_context = None
+        self._quote_context = None
 
     def trade_context(self):
         if self._trade_context is not None:
@@ -33,12 +34,31 @@ class FutuClientManager:
         return self._trade_context
 
     def close(self) -> None:
+        if self._quote_context is not None:
+            try:
+                self._quote_context.close()
+            finally:
+                self._quote_context = None
         if self._trade_context is None:
             return
         try:
             self._trade_context.close()
         finally:
             self._trade_context = None
+
+    def quote_context(self):
+        if self._quote_context is not None:
+            return self._quote_context
+        futu = _load_futu()
+        kwargs = {
+            "host": self._config.host,
+            "port": self._config.port,
+        }
+        try:
+            self._quote_context = futu.OpenQuoteContext(**kwargs)
+        except Exception as exc:
+            raise TradeError(TradeErrorCode.BROKER_DISCONNECTED, f"无法连接 Futu OpenD Quote: {exc}") from exc
+        return self._quote_context
 
 
 def _load_futu():

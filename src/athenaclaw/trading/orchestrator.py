@@ -7,7 +7,9 @@
 
 from __future__ import annotations
 
+from decimal import Decimal, InvalidOperation
 from datetime import datetime, timedelta, timezone
+from time import sleep
 from uuid import uuid4
 
 from athenaclaw.tools.market.schema import normalize_symbol
@@ -38,11 +40,13 @@ class TradeOrchestrator:
         plan_store: TradePlanStore,
         audit_log: TradeAuditLog,
         plan_ttl_sec: int = 120,
+        cancel_confirm_delays: tuple[float, ...] = (0.2, 0.5, 1.0),
     ) -> None:
         self._adapter = adapter
         self._plan_store = plan_store
         self._audit_log = audit_log
         self._plan_ttl_sec = plan_ttl_sec
+        self._cancel_confirm_delays = cancel_confirm_delays
 
     def list_accounts(self):
         return self._adapter.list_accounts()
@@ -87,31 +91,55 @@ class TradeOrchestrator:
         limit_price: float,
     ) -> TradePlan:
         self._require_account_ref(account_ref)
+        requested_limit_price = self._validate_price(limit_price)
         intent = SubmitLimitOrderIntent(
             account_ref=account_ref,
             symbol=normalize_symbol(symbol),
             side=self._normalize_side(side),
             quantity=self._validate_quantity(quantity),
-            limit_price=self._validate_price(limit_price),
+            limit_price=requested_limit_price,
         )
         caps = self._adapter.capabilities()
         if "limit" not in caps.supported_order_types:
             raise TradeError(TradeErrorCode.UNSUPPORTED_ORDER_TYPE, "当前 broker 不支持限价单")
 
         preview = self._adapter.preview_limit_order(intent) if caps.supports_preview_limit_order else None
-        warnings = tuple(preview.warnings if preview else ())
+        normalized_limit_price = preview.normalized_limit_price if preview and preview.normalized_limit_price is not None else intent.limit_price
+        normalized_intent = SubmitLimitOrderIntent(
+            account_ref=intent.account_ref,
+            symbol=intent.symbol,
+            side=intent.side,
+            quantity=intent.quantity,
+            limit_price=normalized_limit_price,
+        )
+        warnings = list(preview.warnings if preview else ())
+        if abs(normalized_intent.limit_price - intent.limit_price) > 1e-9:
+            reason = preview.normalization_reason if preview else None
+            suffix = f" ({reason})" if reason else ""
+            warnings.insert(
+                0,
+                f"limit_price normalized from {_format_price(intent.limit_price)} to {_format_price(normalized_intent.limit_price)}{suffix}",
+            )
         created_at = _utc_now_iso()
         expires_at = _utc_expiry(self._plan_ttl_sec)
         plan = TradePlan(
             plan_id=f"plan-{uuid4().hex}",
             operation="submit_limit",
-            plan_summary=_submit_plan_summary(intent),
-            confirm_text=_submit_confirm_text(intent),
-            warnings=warnings,
+            plan_summary=_submit_plan_summary(normalized_intent),
+            confirm_text=_submit_confirm_text(normalized_intent),
+            warnings=tuple(warnings),
             created_at=created_at,
             expires_at=expires_at,
+            normalized_intent=normalized_intent.to_dict(),
         )
-        self._plan_store.save(plan, payload={"intent": intent.to_dict(), "preview": _preview_payload(preview)})
+        self._plan_store.save(
+            plan,
+            payload={
+                "intent": normalized_intent.to_dict(),
+                "requested_limit_price": intent.limit_price,
+                "preview": _preview_payload(preview),
+            },
+        )
         self._audit_log.append({"event": "trade.plan.created", "plan": plan.to_dict()})
         return plan
 
@@ -172,18 +200,23 @@ class TradeOrchestrator:
                 receipt=receipt,
                 order_status=order_status,
                 account_snapshot=account_snapshot,
+                finalized=order_status.status in _TERMINAL_STATUSES,
             )
         elif operation == "cancel":
             order_ref = str(record["payload"]["order_ref"])
             receipt = self._adapter.cancel_order(order_ref)
-            order_status = self._adapter.get_order_status(order_ref)
+            order_status = self._confirm_order_status(order_ref)
+            finalized = order_status.status in _TERMINAL_STATUSES
+            warnings = ("cancel_requested_not_finalized",) if not finalized else ()
             result = TradeApplyResult(
                 plan_id=plan_id,
                 operation=operation,
-                result_summary=_cancel_result_summary(order_status),
+                result_summary=_cancel_result_summary(order_status, finalized=finalized),
                 receipt=receipt,
                 order_status=order_status,
                 account_snapshot=None,
+                finalized=finalized,
+                warnings=warnings,
             )
         else:
             raise TradeError(TradeErrorCode.UNSUPPORTED_OPERATION, f"不支持的 plan 操作: {operation}")
@@ -214,10 +247,25 @@ class TradeOrchestrator:
 
     @staticmethod
     def _validate_price(price: float) -> float:
-        value = float(price)
+        try:
+            value = Decimal(str(price))
+        except (InvalidOperation, ValueError) as exc:
+            raise TradeError(TradeErrorCode.INVALID_PRICE, "limit_price 必须是合法数字") from exc
         if value <= 0:
             raise TradeError(TradeErrorCode.INVALID_PRICE, "limit_price 必须大于 0")
-        return value
+        return float(value)
+
+    def _confirm_order_status(self, order_ref: str) -> TradeOrderSnapshot:
+        latest = self._adapter.get_order_status(order_ref)
+        if latest.status in _TERMINAL_STATUSES:
+            return latest
+        for delay in self._cancel_confirm_delays:
+            if delay > 0:
+                sleep(delay)
+            latest = self._adapter.get_order_status(order_ref)
+            if latest.status in _TERMINAL_STATUSES:
+                return latest
+        return latest
 
     @staticmethod
     def _require_account_ref(account_ref: str) -> None:
@@ -268,14 +316,14 @@ def _preview_payload(preview: TradePreview | None) -> dict | None:
 def _submit_plan_summary(intent: SubmitLimitOrderIntent) -> str:
     return (
         f"计划提交 {intent.side.upper()} {intent.quantity:g} {intent.symbol} "
-        f"限价 {intent.limit_price:.2f}"
+        f"限价 {_format_price(intent.limit_price)}"
     )
 
 
 def _submit_confirm_text(intent: SubmitLimitOrderIntent) -> str:
     return (
         f"确认提交 {intent.side.upper()} {intent.quantity:g} {intent.symbol} "
-        f"限价 {intent.limit_price:.2f} 吗？"
+        f"限价 {_format_price(intent.limit_price)} 吗？"
     )
 
 
@@ -290,9 +338,16 @@ def _cancel_confirm_text(order: TradeOrderSnapshot) -> str:
 def _submit_result_summary(intent: SubmitLimitOrderIntent, order: TradeOrderSnapshot) -> str:
     return (
         f"已提交 {intent.side.upper()} {intent.quantity:g} {intent.symbol} "
-        f"限价 {intent.limit_price:.2f}，当前状态 {order.status}"
+        f"限价 {_format_price(intent.limit_price)}，当前状态 {order.status}"
     )
 
 
-def _cancel_result_summary(order: TradeOrderSnapshot) -> str:
-    return f"订单当前状态 {order.status}"
+def _cancel_result_summary(order: TradeOrderSnapshot, *, finalized: bool) -> str:
+    if finalized:
+        return f"订单当前状态 {order.status}"
+    return f"撤单请求已发送，当前状态仍为 {order.status}，待券商确认"
+
+
+def _format_price(price: float) -> str:
+    text = f"{float(price):.4f}".rstrip("0").rstrip(".")
+    return text or "0"

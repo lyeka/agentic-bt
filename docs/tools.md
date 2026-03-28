@@ -152,6 +152,14 @@
 
 不能跳过 `trade_plan` 直接执行。
 
+显式参数规则：
+
+- `trade_account.get_positions/get_summary/get_open_orders` 必须显式传 `account_ref`
+- `trade_account.get_order_status` 必须显式传 `order_ref`
+- `trade_plan.submit_limit` 必须显式传 `account_ref`
+- `trade_plan.cancel` 必须显式传 `order_ref`
+- 不会自动承接最近账户、最近订单，也不会返回 suggestion
+
 ### 账户发现
 
 `trade_account.list_accounts` 不只返回 `account_ref`。V1 里它还会返回：
@@ -175,6 +183,33 @@
 
 `trade_account.get_positions` 成功后，会把该账户快照写入 `Kernel.data["account"]`。  
 后续 `compute` 读取到的 `account/cash/equity/positions` 就来自这个当前活动账户快照。
+
+### 计划与执行返回
+
+`trade_plan.submit_limit` 返回的 plan 除了 `plan_id` 外，还会返回：
+
+- `normalized_intent`
+
+其中 `normalized_intent.limit_price` 是后续 `trade_apply` 唯一允许执行的价格。  
+如果 provider 对输入价格做了规范化，plan 的 `warnings` 里会明确写出原始价格和规范化后的价格。
+
+`trade_apply` 返回除了 `order_status` 外，还会返回：
+
+- `finalized`
+- `warnings`
+
+语义是：
+
+- `status=ok` 只表示工具执行成功
+- `finalized=true` 才表示该次交易动作已确认进入终态
+- 撤单后如果短时确认不到终态，会返回 `finalized=false`，并在 `warnings` 中给出 `cancel_requested_not_finalized`
+
+### 缺参错误
+
+缺少 ref 时，不再返回 `invalid_*`，而是：
+
+- 缺少 `account_ref`：`missing_account_ref`
+- 缺少 `order_ref`：`missing_order_ref`
 
 ## market_ohlcv
 

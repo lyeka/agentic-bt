@@ -174,7 +174,9 @@ TRADE_GUIDE = """\
 5. account_ref/order_ref/plan_id 都是系统返回的 opaque 引用。只能传递，不能猜测、拼接或修改。
 6. 在 trade_apply 返回成功之前，不能告诉用户“已提交”“已成交”。
 7. 下单前先看 trade_account.list_accounts 返回的 supported_markets、account_status、account_kind；优先选择 account_status=active 且支持目标市场、类型适合股票/ETF 的账户。extra 是 provider 信息层，可用于解释限制，但不是通用契约。
-8. trade_account.get_positions 成功后，会把当前活动账户快照写入 Kernel.data['account']，供后续 compute 使用；这个 account 只代表当前活动账户，不是多账户容器。
+8. 除 list_accounts 外，读取具体账户或订单时必须显式携带 account_ref 或 order_ref。不要省略，也不要假设系统会自动承接最近账户或最近订单。
+9. 没有同 broker 的新鲜行情或明确 market-state 证据时，不得推断“更容易成交”“当前处于常规交易时段”。类似 session=RTH 只能理解为订单会话语义，不能理解为当前市场状态。
+10. trade_account.get_positions 成功后，会把当前活动账户快照写入 Kernel.data['account']，供后续 compute 使用；这个 account 只代表当前活动账户，不是多账户容器。
 </trade_tools>"""
 
 EVOLUTION_GUIDE = """\
