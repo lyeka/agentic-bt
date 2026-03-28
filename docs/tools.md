@@ -12,6 +12,9 @@
 | `market_ohlcv` | 获取 OHLCV，写入 DataStore，供 `compute` 消费 |
 | `portfolio` | 维护结构化当前持仓快照 `portfolio.json` |
 | `watchlist` | 维护结构化自选列表快照 `watchlist.json` |
+| `trade_account` | 读取远端 broker 账户、持仓、未完成订单、订单状态 |
+| `trade_plan` | 生成交易执行计划，不直接产生外部副作用 |
+| `trade_apply` | 执行 `trade_plan` 生成的计划 |
 | `compute` | 在沙箱中对已加载 OHLCV 做 Python 分析 |
 | `read` | 读工作区文件 |
 | `write` | 写工作区文件 |
@@ -19,7 +22,7 @@
 | `bash` | 执行 shell 命令（按权限控制） |
 | `web_search` / `web_fetch` | 可选 Web 搜索与抓取 |
 
-其中最容易用错的是 `portfolio`、`watchlist`、`market_ohlcv` 和 `compute`。
+其中最容易用错的是 `portfolio`、`watchlist`、`trade_account`、`trade_plan`、`trade_apply`、`market_ohlcv` 和 `compute`。
 
 ## portfolio
 
@@ -54,6 +57,12 @@
 
 `memory.md` 适合长期偏好、风险边界、关注方向。
 详细持仓需要结构化读取和 UI 展示，因此单独维护在 `portfolio.json`。
+
+注意：
+
+- `portfolio` 不是远端 broker 账户
+- 使用交易工具执行远端下单/撤单后，不会自动改写 `portfolio.json`
+- 如果用户明确要把工作区快照同步到远端 broker 结果，应通过后续专门同步动作完成，而不是在 V1 自动覆盖
 
 ## watchlist
 
@@ -104,6 +113,49 @@
 
 `memory.md` 适合记录高层关注方向和长期偏好。
 具体自选 symbol 清单、观察理由和加入时间需要结构化读取，因此单独维护在 `watchlist.json`。
+
+## trade_account / trade_plan / trade_apply
+
+### 核心语义
+
+这三者共同组成远端 broker 交易闭环：
+
+- `trade_account`：读取远端账户状态
+- `trade_plan`：创建可确认、可审计的执行计划
+- `trade_apply`：执行计划
+
+它们不是 `portfolio` 的替代物，也不会自动维护 `portfolio.json`。
+
+### V1 边界
+
+只支持：
+
+- 股票/ETF
+- `LIMIT`
+- `BUY`
+- `SELL`
+- `CANCEL`
+
+不支持：
+
+- `MARKET`
+- `STOP`
+- `AUCTION`
+- 条件单
+- 期权/期货/融资融券/卖空
+
+### 正确用法
+
+1. 先 `trade_account.list_accounts`
+2. 再 `trade_plan.submit_limit` 或 `trade_plan.cancel`
+3. 最后 `trade_apply`
+
+不能跳过 `trade_plan` 直接执行。
+
+### 活动账户快照
+
+`trade_account.get_positions` 成功后，会把该账户快照写入 `Kernel.data["account"]`。  
+后续 `compute` 读取到的 `account/cash/equity/positions` 就来自这个当前活动账户快照。
 
 ## market_ohlcv
 

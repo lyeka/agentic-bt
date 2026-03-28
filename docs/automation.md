@@ -24,6 +24,7 @@ status: active
 - 不做工作流编排平台
 - 不做自动交易
 - 不允许自动化任务直接修改 `workspace/automation/tasks/**`
+- 不允许自动化任务执行远端 broker 交易动作
 
 ## 2. 核心抽象
 
@@ -223,6 +224,12 @@ Reaction 不是 workflow，而是“一次执行”。
 - 只有 `report_writer` profile 才允许写 `notebook/automation/<task_id>/**`
 
 同时，通用 `write/edit` 工具也显式拒绝修改 `automation/tasks/**`，任务定义只能通过 `task_apply` 生效。
+
+交易工具的自动化规则：
+
+- `trade_account` 允许只读使用
+- `trade_plan` 永久禁止
+- `trade_apply` 永久禁止
 
 ## 11. 幂等与恢复
 

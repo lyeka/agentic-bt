@@ -2,6 +2,7 @@ from athenaclaw.runtime.bundle import (
     KernelBundle,
     _build_automation_delivery_channels,
     _build_market_adapter,
+    _build_trade_adapter,
     _wire_trace,
     build_kernel_bundle,
 )
@@ -15,6 +16,7 @@ __all__ = [
     "SessionStore",
     "_build_automation_delivery_channels",
     "_build_market_adapter",
+    "_build_trade_adapter",
     "_wire_trace",
     "build_kernel_bundle",
 ]

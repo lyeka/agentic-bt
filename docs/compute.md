@@ -33,6 +33,13 @@
 - `account/cash/equity/positions`
 - `pd/np/ta/math`
 
+`account` 的来源说明：
+
+- 默认是当前会话里最近一次写入的活动账户快照
+- 它可以来自交易工具 `trade_account.get_positions`
+- 它不等于 `portfolio.json`，也不是多账户容器
+- 如果你要分析另一个远端 broker 账户，必须先显式读取那个账户的快照
+
 预置 helper：
 
 - `latest(series)`

@@ -19,7 +19,8 @@ from athenaclaw.automation.store import AutomationStore
 from athenaclaw.automation import tools as automation_tools
 from athenaclaw.llm.providers import LLMProvider, OpenAIChatProvider
 from athenaclaw.runtime.session_store import JsonSessionStore, SessionStore
-from athenaclaw.tools import bash, compute, edit, market, portfolio, read, watchlist, web, write
+from athenaclaw.tools import bash, compute, edit, market, portfolio, read, trade, watchlist, web, write
+from athenaclaw.trading import TradeAuditLog, TradeOrchestrator, TradePlanStore
 from athenaclaw.subagents import SubAgentDef
 
 
@@ -69,6 +70,10 @@ class AgentConfig:
     subagents: list[SubAgentDef] | None = None
     automation_default_timezone: str = "Asia/Shanghai"
     automation_task_scan_sec: int = 30
+    trade_broker: str | None = None
+    futu_host: str = "127.0.0.1"
+    futu_port: int = 11111
+    futu_security_firm: str | None = None
 
     @classmethod
     def from_env(cls) -> AgentConfig:
@@ -90,6 +95,10 @@ class AgentConfig:
         image_detail = (os.getenv("ATHENACLAW_IMAGE_DETAIL") or "low").strip().lower() or "low"
         automation_default_timezone = os.getenv("ATHENACLAW_AUTOMATION_DEFAULT_TIMEZONE", "Asia/Shanghai")
         automation_task_scan_sec = int(os.getenv("ATHENACLAW_AUTOMATION_TASK_SCAN_SEC", "30"))
+        trade_broker = os.getenv("ATHENACLAW_TRADE_BROKER") or None
+        futu_host = os.getenv("ATHENACLAW_FUTU_HOST", "127.0.0.1")
+        futu_port = int(os.getenv("ATHENACLAW_FUTU_PORT", "11111"))
+        futu_security_firm = os.getenv("ATHENACLAW_FUTU_SECURITY_FIRM") or None
         return cls(
             model=model,
             base_url=base_url,
@@ -109,6 +118,10 @@ class AgentConfig:
             image_detail=image_detail,
             automation_default_timezone=automation_default_timezone,
             automation_task_scan_sec=automation_task_scan_sec,
+            trade_broker=trade_broker,
+            futu_host=futu_host,
+            futu_port=futu_port,
+            futu_security_firm=futu_security_firm,
         )
 
 
@@ -214,6 +227,22 @@ def _build_market_adapter(config: AgentConfig) -> object:
     return composite
 
 
+def _build_trade_adapter(config: AgentConfig) -> object | None:
+    if not config.trade_broker:
+        return None
+    if config.trade_broker == "futu":
+        from athenaclaw.integrations.futu.config import FutuTradeConfig
+        from athenaclaw.integrations.futu.trade_adapter import FutuTradeAdapter
+
+        futu_config = FutuTradeConfig(
+            host=config.futu_host,
+            port=config.futu_port,
+            security_firm=config.futu_security_firm,
+        )
+        return FutuTradeAdapter(config=futu_config)
+    raise ValueError(f"Unknown trade adapter: {config.trade_broker}")
+
+
 def _build_automation_delivery_channels() -> dict[str, object]:
     from athenaclaw.automation.delivery import DiscordDeliveryChannel, TelegramDeliveryChannel, WebhookDeliveryChannel
 
@@ -270,6 +299,14 @@ def build_kernel_bundle(
     compute.register(kernel)
     portfolio.register(kernel, workspace)
     watchlist.register(kernel, workspace)
+    trade_adapter = _build_trade_adapter(config)
+    if trade_adapter is not None:
+        orchestrator = TradeOrchestrator(
+            adapter=trade_adapter,
+            plan_store=TradePlanStore(state),
+            audit_log=TradeAuditLog(state),
+        )
+        trade.register(kernel, orchestrator)
     read.register(kernel, workspace, cwd=cwd)
     write.register(kernel, workspace, cwd=cwd)
     edit.register(kernel, workspace, cwd=cwd)

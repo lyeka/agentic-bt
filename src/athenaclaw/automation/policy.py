@@ -19,6 +19,8 @@ _ALWAYS_DENIED = {
     "task_apply",
     "task_control",
     "create_subagent",
+    "trade_plan",
+    "trade_apply",
 }
 
 

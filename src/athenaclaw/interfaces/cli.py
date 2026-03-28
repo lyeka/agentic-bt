@@ -156,8 +156,8 @@ def _run_simple(config: AgentConfig, bundle: Any) -> None:
     session = _load_session(bundle)
     kernel = bundle.kernel
 
-    def _cli_confirm(path: str) -> bool:
-        answer = input(f"\n确认操作 {path}? [y/n] ").strip().lower()
+    def _cli_confirm(message: str) -> bool:
+        answer = input(f"\n{message} [y/n] ").strip().lower()
         return answer in ("y", "yes")
 
     kernel.on_confirm(_cli_confirm)

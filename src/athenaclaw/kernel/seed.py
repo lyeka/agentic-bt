@@ -112,6 +112,7 @@ compute 跑计算，market_ohlcv 拉行情，bash 执行命令。
 用户说加入自选、移出自选、给出完整自选列表，或希望围绕某个观察理由持续跟踪标的时，
 优先用 watchlist；不要把具体自选 symbol 清单继续写进 memory.md。
 如果截图不完整、账户不明确、symbol 无法可靠识别，先追问，不要猜。
+如果你使用远端 broker 交易工具读取或执行了账户动作，这不会自动改写 portfolio.json；只有用户明确要求同步工作区快照时，才更新 portfolio。
 如果你先后抓了多份不同时间粒度的数据，后续 compute 要复用同一组
 symbol/interval/mode/start/end selector，别拿错数据帧。
 如果只是为了把大窗口行情送进 compute，调用 market_ohlcv 时把
