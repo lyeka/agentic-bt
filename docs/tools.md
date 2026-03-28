@@ -152,6 +152,25 @@
 
 不能跳过 `trade_plan` 直接执行。
 
+### 账户发现
+
+`trade_account.list_accounts` 不只返回 `account_ref`。V1 里它还会返回：
+
+- `supported_markets`
+- `account_status`
+- `account_kind`
+- `is_simulated`
+- `extra`
+
+其中：
+
+- 公共字段用于跨 broker 选户
+- `extra` 用于解释 provider 特有的限制或能力
+
+对 Futu 来说，`extra` 至少会包含类似 `sim_acc_type`、`trdmarket_auth`、`acc_status`、`acc_role` 这类原生账户信息。
+
+当要交易某个 symbol 时，先用这些字段判断账户是否支持目标市场、是否 active、以及是否是合适的账户类型。
+
 ### 活动账户快照
 
 `trade_account.get_positions` 成功后，会把该账户快照写入 `Kernel.data["account"]`。  

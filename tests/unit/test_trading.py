@@ -40,9 +40,14 @@ class _FakeTradeAdapter:
             order_id="9001",
         )
         self._submitted = False
+        self.preview_calls = 0
+        self.preview_error: TradeError | None = None
 
     def capabilities(self) -> TradeCapabilities:
-        return TradeCapabilities(supports_account_summary=True)
+        return TradeCapabilities(
+            supports_account_summary=True,
+            supports_preview_limit_order=True,
+        )
 
     def list_accounts(self):
         return [
@@ -52,6 +57,11 @@ class _FakeTradeAdapter:
                 account_id="1001",
                 env="simulate",
                 display_name="fake-sim-1001",
+                supported_markets=("US",),
+                account_status="active",
+                account_kind="stock",
+                is_simulated=True,
+                extra={"sim_acc_type": "STOCK", "trdmarket_auth": ["US"]},
                 capabilities=self.capabilities(),
             )
         ]
@@ -118,7 +128,10 @@ class _FakeTradeAdapter:
         )
 
     def preview_limit_order(self, intent: SubmitLimitOrderIntent):
-        return None
+        self.preview_calls += 1
+        if self.preview_error is not None:
+            raise self.preview_error
+        return TradePreview(warnings=("preview-ok",), max_buy=100.0, max_sell=0.0)
 
 
 def _make_orchestrator(tmp_path: Path) -> tuple[TradeOrchestrator, _FakeTradeAdapter]:
@@ -141,6 +154,9 @@ def test_trade_orchestrator_plan_and_apply_submit_limit(tmp_path):
         quantity=10,
         limit_price=180,
     )
+
+    assert adapter.preview_calls == 1
+    assert tuple(plan.warnings) == ("preview-ok",)
 
     result = orchestrator.apply(plan.plan_id)
 
@@ -177,6 +193,26 @@ def test_trade_orchestrator_rejects_expired_plan(tmp_path):
     assert exc.value.code == TradeErrorCode.PLAN_EXPIRED
 
 
+def test_trade_orchestrator_rejects_preview_failure_during_plan(tmp_path):
+    orchestrator, adapter = _make_orchestrator(tmp_path)
+    adapter.preview_error = TradeError(
+        TradeErrorCode.ACCOUNT_MARKET_UNSUPPORTED,
+        "当前账户不支持交易 AAPL",
+    )
+
+    with pytest.raises(TradeError) as exc:
+        orchestrator.plan_submit_limit(
+            account_ref=adapter.account_ref,
+            symbol="AAPL",
+            side="buy",
+            quantity=10,
+            limit_price=180,
+        )
+
+    assert adapter.preview_calls == 1
+    assert exc.value.code == TradeErrorCode.ACCOUNT_MARKET_UNSUPPORTED
+
+
 def test_trade_tools_inject_active_account_snapshot(tmp_path):
     orchestrator, adapter = _make_orchestrator(tmp_path)
     kernel = Kernel(api_key="test")
@@ -205,6 +241,22 @@ def test_trade_tools_inject_active_account_snapshot(tmp_path):
     account = kernel.data.get("account")
     assert account["positions"]["AAPL"]["quantity"] == 10
     assert kernel.data.get("trade:last_result")["plan_id"] == plan["plan_id"]
+
+
+def test_trade_account_list_accounts_exposes_account_capabilities_and_extra(tmp_path):
+    orchestrator, adapter = _make_orchestrator(tmp_path)
+    kernel = Kernel(api_key="test")
+    register_trade_tools(kernel, orchestrator)
+
+    result = kernel._tools["trade_account"].handler({"action": "list_accounts"})
+    assert result["status"] == "ok"
+    account = result["accounts"][0]
+    assert account["account_ref"] == adapter.account_ref
+    assert account["supported_markets"] == ["US"]
+    assert account["account_status"] == "active"
+    assert account["account_kind"] == "stock"
+    assert account["is_simulated"] is True
+    assert account["extra"]["sim_acc_type"] == "STOCK"
 
 
 def test_trade_guide_injected_when_trade_tools_registered(tmp_path):

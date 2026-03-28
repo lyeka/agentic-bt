@@ -15,6 +15,8 @@ class TradeErrorCode(str, Enum):
     BROKER_NOT_CONFIGURED = "broker_not_configured"
     BROKER_DISCONNECTED = "broker_disconnected"
     ACCOUNT_NOT_FOUND = "account_not_found"
+    ACCOUNT_MARKET_UNSUPPORTED = "account_market_unsupported"
+    ACCOUNT_INACTIVE = "account_inactive"
     ORDER_NOT_FOUND = "order_not_found"
     ORDER_NOT_CANCELLABLE = "order_not_cancellable"
     PLAN_NOT_FOUND = "plan_not_found"
@@ -30,6 +32,7 @@ class TradeErrorCode(str, Enum):
     UNSUPPORTED_CAPABILITY = "unsupported_capability"
     TRADE_LOCKED = "trade_locked"
     PERMISSION_DENIED = "permission_denied"
+    PREVIEW_REJECTED = "preview_rejected"
     PROVIDER_ERROR = "provider_error"
 
 

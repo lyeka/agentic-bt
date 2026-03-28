@@ -49,7 +49,7 @@ class FutuTradeAdapter:
             supported_envs=("simulate", "real"),
             supports_cancel=True,
             supports_account_summary=True,
-            supports_preview_limit_order=False,
+            supports_preview_limit_order=True,
         )
 
     def list_accounts(self) -> list[TradeAccountDescriptor]:
@@ -60,8 +60,27 @@ class FutuTradeAdapter:
         for _, row in df.iterrows():
             account_id = str(_col(row, "acc_id", "account_id") or "").strip()
             env = _normalize_env(_col(row, "trd_env", "trade_env"))
-            label = _string_or_none(_col(row, "uni_card_num", "card_num", "acc_type"))
-            display_name = label or f"futu-{env}-{account_id}"
+            label = _string_or_none(_col(row, "uni_card_num", "card_num"))
+            supported_markets = _normalize_market_list(_col(row, "trdmarket_auth"))
+            account_status = _normalize_account_status(_col(row, "acc_status"))
+            account_kind = _normalize_account_kind(_col(row, "sim_acc_type"), _col(row, "acc_type"))
+            extra = {
+                "security_firm": _string_or_none(_col(row, "security_firm")),
+                "acc_type": _string_or_none(_col(row, "acc_type")),
+                "sim_acc_type": _string_or_none(_col(row, "sim_acc_type")),
+                "acc_role": _string_or_none(_col(row, "acc_role")),
+                "trdmarket_auth": list(supported_markets),
+                "jp_acc_type": _normalize_string_list(_col(row, "jp_acc_type")),
+                "uni_card_num": _string_or_none(_col(row, "uni_card_num")),
+                "card_num": _string_or_none(_col(row, "card_num")),
+            }
+            display_name = _build_display_name(
+                account_id=account_id,
+                env=env,
+                label=label,
+                supported_markets=supported_markets,
+                account_kind=account_kind,
+            )
             result.append(
                 TradeAccountDescriptor(
                     account_ref=encode_account_ref(broker=self.name, env=env, account_id=account_id),
@@ -69,6 +88,11 @@ class FutuTradeAdapter:
                     account_id=account_id,
                     env=env,
                     display_name=display_name,
+                    supported_markets=supported_markets,
+                    account_status=account_status,
+                    account_kind=account_kind,
+                    is_simulated=(env == "simulate"),
+                    extra=extra,
                     label=label,
                     capabilities=self.capabilities(),
                 )
@@ -240,14 +264,111 @@ class FutuTradeAdapter:
         )
 
     def preview_limit_order(self, intent: SubmitLimitOrderIntent) -> TradePreview | None:
+        account = decode_account_ref(intent.account_ref)
+        descriptor = self._find_account(intent.account_ref)
+        if descriptor is None:
+            raise TradeError(
+                TradeErrorCode.ACCOUNT_NOT_FOUND,
+                f"未找到账户: {account['account_id']}",
+                details={"account_ref": intent.account_ref},
+            )
+        self._validate_account_for_intent(descriptor, intent)
+
+        futu = _load_futu()
+        ctx = self._manager.trade_context()
+        ret, data = ctx.acctradinginfo_query(
+            order_type=futu.OrderType.NORMAL,
+            code=to_futu_code(intent.symbol),
+            price=float(intent.limit_price),
+            trd_env=_trd_env(account["env"]),
+            acc_id=int(account["account_id"]),
+        )
+        df = self._ensure_frame(ret, data, "acctradinginfo_query", allow_empty=True)
+        if df.empty:
+            raise TradeError(
+                TradeErrorCode.PREVIEW_REJECTED,
+                f"无法预检查账户 {account['account_id']} 对 {intent.symbol} 的交易能力",
+                details={"account_ref": intent.account_ref, "symbol": intent.symbol},
+            )
+
+        row = df.iloc[0]
+        max_buy = _float_or_none(_col(row, "max_cash_and_margin_buy", "max_cash_buy"))
+        max_sell = _float_or_none(_col(row, "max_position_sell"))
+        if intent.side == "buy" and max_buy is not None and intent.quantity > max_buy:
+            raise TradeError(
+                TradeErrorCode.PREVIEW_REJECTED,
+                f"当前账户最多可买 {max_buy:g}，无法提交 BUY {intent.quantity:g} {intent.symbol}",
+                details={
+                    "account_ref": intent.account_ref,
+                    "symbol": intent.symbol,
+                    "requested_quantity": intent.quantity,
+                    "max_buy": max_buy,
+                },
+            )
+        if intent.side == "sell" and max_sell is not None and intent.quantity > max_sell:
+            raise TradeError(
+                TradeErrorCode.PREVIEW_REJECTED,
+                f"当前账户最多可卖 {max_sell:g}，无法提交 SELL {intent.quantity:g} {intent.symbol}",
+                details={
+                    "account_ref": intent.account_ref,
+                    "symbol": intent.symbol,
+                    "requested_quantity": intent.quantity,
+                    "max_sell": max_sell,
+                },
+            )
+
+        warnings: list[str] = []
+        session = _string_or_none(_col(row, "session"))
+        if session and session.upper() not in {"N/A", "NONE"}:
+            warnings.append(f"provider session={session}")
+        return TradePreview(warnings=tuple(warnings), max_buy=max_buy, max_sell=max_sell)
+
+    def _find_account(self, account_ref: str) -> TradeAccountDescriptor | None:
+        for item in self.list_accounts():
+            if item.account_ref == account_ref:
+                return item
         return None
+
+    def _validate_account_for_intent(self, descriptor: TradeAccountDescriptor, intent: SubmitLimitOrderIntent) -> None:
+        if descriptor.account_status == "disabled":
+            raise TradeError(
+                TradeErrorCode.ACCOUNT_INACTIVE,
+                "当前账户已失效，不能用于下单",
+                details={
+                    "account_ref": descriptor.account_ref,
+                    "account_status": descriptor.account_status,
+                },
+            )
+
+        required_markets = _required_markets_for_symbol(intent.symbol)
+        if descriptor.supported_markets and not any(market in descriptor.supported_markets for market in required_markets):
+            raise TradeError(
+                TradeErrorCode.ACCOUNT_MARKET_UNSUPPORTED,
+                f"当前账户不支持交易 {intent.symbol}",
+                details={
+                    "account_ref": descriptor.account_ref,
+                    "symbol": intent.symbol,
+                    "required_markets": list(required_markets),
+                    "supported_markets": list(descriptor.supported_markets),
+                },
+            )
+
+        if descriptor.account_kind not in {"stock", "mixed", "unknown"}:
+            raise TradeError(
+                TradeErrorCode.PREVIEW_REJECTED,
+                f"当前账户类型不适合股票/ETF 交易: {descriptor.account_kind}",
+                details={
+                    "account_ref": descriptor.account_ref,
+                    "account_kind": descriptor.account_kind,
+                },
+            )
 
     @staticmethod
     def _ensure_frame(ret: int, data: Any, op: str, *, allow_empty: bool = False) -> pd.DataFrame:
         futu = _load_futu()
         if ret != futu.RET_OK:
             text = str(data)
-            code = TradeErrorCode.TRADE_LOCKED if "unlock" in text.lower() else TradeErrorCode.PROVIDER_ERROR
+            code = _translate_error_code(text, op=op)
             raise TradeError(code, f"{op} 失败: {text}")
         if isinstance(data, pd.DataFrame):
             return data
@@ -262,13 +383,77 @@ def _trd_env(env: str):
 
 
 def _normalize_env(raw: object) -> str:
-    text = str(raw or "").strip().upper()
+    text = _enum_name(raw)
     return "simulate" if "SIM" in text else "real"
 
 
 def _normalize_side(raw: object) -> str:
-    text = str(raw or "").strip().upper()
+    text = _enum_name(raw)
     return "buy" if "BUY" in text else "sell"
+
+
+def _normalize_market_list(raw: object) -> tuple[str, ...]:
+    values = _normalize_string_list(raw)
+    normalized: list[str] = []
+    for item in values:
+        market = _enum_name(item)
+        if market and market not in normalized:
+            normalized.append(market)
+    return tuple(normalized)
+
+
+def _normalize_account_status(raw: object) -> str:
+    text = _enum_name(raw)
+    if text == "ACTIVE":
+        return "active"
+    if text == "DISABLED":
+        return "disabled"
+    return "unknown"
+
+
+def _normalize_account_kind(sim_acc_type: object, acc_type: object) -> str:
+    sim = _enum_name(sim_acc_type)
+    if sim == "STOCK":
+        return "stock"
+    if sim == "OPTION":
+        return "option"
+    if sim == "FUTURES":
+        return "futures"
+    if sim == "STOCK_AND_OPTION":
+        return "mixed"
+
+    acc = _enum_name(acc_type)
+    if acc in {"CASH", "MARGIN"}:
+        return "stock"
+    if "OPTION" in acc:
+        return "option"
+    if "FUTURE" in acc:
+        return "futures"
+    return "unknown"
+
+
+def _build_display_name(
+    *,
+    account_id: str,
+    env: str,
+    label: str | None,
+    supported_markets: tuple[str, ...],
+    account_kind: str,
+) -> str:
+    base = label or account_id
+    market_text = "/".join(supported_markets) if supported_markets else "unknown-market"
+    return f"{base} ({env} | {market_text} | {account_kind})"
+
+
+def _required_markets_for_symbol(symbol: str) -> tuple[str, ...]:
+    code = to_futu_code(symbol)
+    if code.startswith("US."):
+        return ("US",)
+    if code.startswith("HK."):
+        return ("HK",)
+    if code.startswith(("SH.", "SZ.", "BJ.")):
+        return ("HKCC",)
+    return ()
 
 
 def _normalize_result_symbol(raw: object) -> str:
@@ -294,8 +479,17 @@ def _col(row, *names: str):
     if row is None:
         return None
     for name in names:
-        if name in row.index and pd.notna(row[name]):
-            return row[name]
+        if name not in row.index:
+            continue
+        value = row[name]
+        if isinstance(value, (list, tuple, set, dict)):
+            return value
+        try:
+            if pd.notna(value):
+                return value
+        except Exception:
+            if value is not None:
+                return value
     return None
 
 
@@ -315,4 +509,47 @@ def _float_or_zero(value: object) -> float:
 
 def _string_or_none(value: object) -> str | None:
     text = str(value or "").strip()
+    if text.upper() == "N/A":
+        return None
     return text or None
+
+
+def _normalize_string_list(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        items = list(value)
+    else:
+        text = str(value).strip()
+        if not text or text.upper() == "N/A":
+            return []
+        if text.startswith("[") and text.endswith("]"):
+            text = text[1:-1]
+        items = [part.strip() for part in text.split(",")]
+    normalized: list[str] = []
+    for item in items:
+        text = _enum_name(str(item or "").strip().strip("'").strip('"'))
+        if not text or text.upper() == "N/A":
+            continue
+        normalized.append(text)
+    return normalized
+
+
+def _enum_name(value: object) -> str:
+    text = str(value or "").strip().upper()
+    if "." in text:
+        text = text.split(".")[-1]
+    return text
+
+
+def _translate_error_code(text: str, *, op: str) -> TradeErrorCode:
+    lowered = text.lower()
+    if "unlock" in lowered:
+        return TradeErrorCode.TRADE_LOCKED
+    if "不支持交易" in text or "not support" in lowered:
+        return TradeErrorCode.ACCOUNT_MARKET_UNSUPPORTED
+    if "disabled" in lowered or "失效" in text:
+        return TradeErrorCode.ACCOUNT_INACTIVE
+    if op == "acctradinginfo_query":
+        return TradeErrorCode.PREVIEW_REJECTED
+    return TradeErrorCode.PROVIDER_ERROR

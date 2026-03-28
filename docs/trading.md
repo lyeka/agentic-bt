@@ -88,6 +88,32 @@ flowchart LR
 - `get_account_summary(account_ref)`
 - `preview_limit_order(intent)`
 
+### 账户发现
+
+`list_accounts()` 返回的每个账户描述，除了基础标识外，还应包含一组稳定的账户能力字段：
+
+- `supported_markets`
+- `account_status`
+- `account_kind`
+- `is_simulated`
+- `extra`
+
+这些字段的分工如下：
+
+- 公共字段负责跨 broker 的基础选户语义，例如“这个账户是否 active”“是否支持 US 市场”“是否更像股票户还是期权户”
+- `extra` 负责承载 provider 专有信息；V1 只在账户发现落地，不默认扩散到 orders/positions/plan/receipt
+
+Futu 账户发现至少要把这些专有信息放进 `extra`：
+
+- `security_firm`
+- `acc_type`
+- `sim_acc_type`
+- `acc_role`
+- `trdmarket_auth`
+- `jp_acc_type`
+- `uni_card_num`
+- `card_num`
+
 canonical 标识：
 
 - `account_ref`
@@ -129,6 +155,7 @@ canonical 状态只保留：
 - `trade_apply` 永远只消费 `plan_id`
 - tool 不得直连 adapter 的 mutating 方法
 - `Kernel.data["account"]` 在 V1 里只表示“当前活动账户快照”
+- `trade_account.list_accounts` 必须返回足够的账户能力信息，让用户和 Agent 在不打开券商客户端的前提下也能判断哪个账户支持目标市场
 
 ## 6. Prompt 与安全
 
@@ -138,6 +165,7 @@ canonical 状态只保留：
 - 不得伪造 `account_ref/order_ref/plan_id`
 - V1 只支持限价单
 - `portfolio` 不是远端 broker 账户
+- 下单前先看 `trade_account.list_accounts` 里的 `supported_markets`、`account_status`、`account_kind`；`extra` 可用于解释 provider 特有限制
 - 在 `trade_apply` 成功前，不能宣称“已提交/已成交”
 - broker 交易不会自动改写 `portfolio.json`
 
@@ -161,6 +189,12 @@ Futu 作为首个 provider，只接证券账户交易。
 - `place_order(order_type=OrderType.NORMAL)` -> `submit_limit_order`
 - `modify_order(ModifyOrderOp.CANCEL)` -> `cancel_order`
 - `accinfo_query` -> `get_account_summary`
+- `acctradinginfo_query` -> `preview_limit_order`
+
+Futu 账户发现不做 provider 侧隐式过滤；仍返回全部账户。选户正确性由两层保障：
+
+- `list_accounts` 直接暴露账户能力与 `extra`
+- `trade_plan.submit_limit` 通过 `preview_limit_order` 在 plan 阶段前置拦截“不支持该市场/账户已失效/账户类型不适合/最大可买卖不足”等硬失败
 
 V1 不做：
 

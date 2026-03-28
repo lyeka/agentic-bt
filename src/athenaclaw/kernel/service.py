@@ -173,7 +173,8 @@ TRADE_GUIDE = """\
 4. V1 只支持股票/ETF 的 LIMIT 限价单，以及撤销未完成订单。不支持 market/stop/条件单/衍生品。
 5. account_ref/order_ref/plan_id 都是系统返回的 opaque 引用。只能传递，不能猜测、拼接或修改。
 6. 在 trade_apply 返回成功之前，不能告诉用户“已提交”“已成交”。
-7. trade_account.get_positions 成功后，会把当前活动账户快照写入 Kernel.data['account']，供后续 compute 使用；这个 account 只代表当前活动账户，不是多账户容器。
+7. 下单前先看 trade_account.list_accounts 返回的 supported_markets、account_status、account_kind；优先选择 account_status=active 且支持目标市场、类型适合股票/ETF 的账户。extra 是 provider 信息层，可用于解释限制，但不是通用契约。
+8. trade_account.get_positions 成功后，会把当前活动账户快照写入 Kernel.data['account']，供后续 compute 使用；这个 account 只代表当前活动账户，不是多账户容器。
 </trade_tools>"""
 
 EVOLUTION_GUIDE = """\

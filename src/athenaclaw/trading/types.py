@@ -105,11 +105,17 @@ class TradeAccountDescriptor:
     account_id: str
     env: str
     display_name: str
+    supported_markets: tuple[str, ...] = ()
+    account_status: str = "unknown"
+    account_kind: str = "unknown"
+    is_simulated: bool = False
+    extra: dict[str, Any] = field(default_factory=dict)
     label: str | None = None
     capabilities: TradeCapabilities = field(default_factory=TradeCapabilities)
 
     def to_dict(self) -> dict[str, Any]:
         data = asdict(self)
+        data["supported_markets"] = list(self.supported_markets)
         data["capabilities"] = self.capabilities.to_dict()
         return data
 

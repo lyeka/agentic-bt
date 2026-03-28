@@ -101,6 +101,8 @@ def register(kernel: object, orchestrator: object) -> None:
             "读取远端 broker 账户状态。支持列可用账户、读取当前持仓、未完成订单、单个订单当前状态。"
             "何时使用: 用户要看远端交易账户状态、下单前确认账户、成交后刷新活动账户。"
             "何时不要用: 维护本地 portfolio.json/watchlist.json、讨论交易计划但尚未操作远端账户时。"
+            "list_accounts 会返回账户的 supported_markets、account_status、account_kind 以及 provider extra，"
+            "用于判断哪个账户支持目标市场、是否可交易、以及 provider 特有的限制信息。"
             "重要语义: get_positions 成功后，会把该账户快照写入当前会话的 Kernel.data['account']，供后续 compute 使用；"
             "这个 account 只代表当前活动账户，不是多账户容器。"
         ),
