@@ -228,7 +228,7 @@
 
 字段语义：
 
-- `symbol`: 标的代码。A 股内部统一归一化为 `.SH/.SZ/.BJ`，`yfinance` 出站时会把 `.SH` 转成 `.SS`
+- `symbol`: 标的代码。支持美股、港股和 A 股。A 股内部统一归一化为 `.SH/.SZ/.BJ`，`yfinance` 出站时会把 `.SH` 转成 `.SS`
 - `interval`: bar 粒度，只能是 `1d | 1m | 5m | 15m | 30m | 60m`
 - `mode`:
   - `history`: 返回一段 OHLCV
@@ -249,6 +249,8 @@
 - `mode="latest"` 不是“交易所实时流”，而是“数据源当前最新可用的一根 bar”
 - `mode="latest"` 禁止传 `start/end`
 - `interval="1d"` 禁止配 `mode="latest"`
+- 当前 provider 可为 `tushare | yfinance | finnhub | futu`
+- `futu` 这一版默认使用**不复权**口径，不暴露 `autype/session/extended_time` 公共参数
 - 日线 `start/end` 用 `YYYY-MM-DD`
 - 分钟 `start/end` 用 `YYYY-MM-DD HH:MM:SS`
 - `include_data_in_result` 只控制返回 JSON 是否带 `data`，不影响 fetch、DataStore 注入和后续 `compute`

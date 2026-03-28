@@ -1,6 +1,6 @@
 """
 [INPUT]: re, typing (Callable), athenaclaw.tools.market.schema
-[OUTPUT]: CompositeMarketAdapter — 多数据源聚合路由器, is_ashare — A 股 symbol 识别
+[OUTPUT]: CompositeMarketAdapter — 多数据源聚合路由器, is_ashare/is_hk_symbol — 市场 symbol 识别
 [POS]: adapter 层组合模式，对外满足 MarketAdapter Protocol，market tool 零感知
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -50,8 +50,14 @@ class CompositeMarketAdapter:
 # ─────────────────────────────────────────────────────────────────────────────
 
 _ASHARE_RE = re.compile(r"^\d{6}\.(SZ|SS|SH|BJ)$", re.IGNORECASE)
+_HK_RE = re.compile(r"^\d{5}\.HK$", re.IGNORECASE)
 
 
 def is_ashare(symbol: str) -> bool:
     """A 股 symbol：000001.SZ / 600519.SS / 688001.SH / 830001.BJ"""
     return bool(_ASHARE_RE.match(symbol))
+
+
+def is_hk_symbol(symbol: str) -> bool:
+    """港股 symbol：00700.HK / 02800.HK"""
+    return bool(_HK_RE.match(symbol))

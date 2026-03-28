@@ -418,12 +418,14 @@ market_ohlcv(
 - `interval` 表示 bar 粒度，不是 lookback window
 - `mode="history"` 返回一段 OHLCV
 - `mode="latest"` 返回最新可用的一根分钟 bar，不是交易所实时流
+- 运行时市场路由按 `CN/HK/US` 选择 provider；港股不再走“非 A 股”模糊回退路径
 - 默认窗口：
   - `1d/history` → 最近一年
   - 分钟 `history` → 当日盘中；休市时回退到最近一个交易日
 - `start/end` 只对 `history` 生效
 - `include_data_in_result=False` 时，OHLCV 仍会写入 DataStore，只是返回 `data=[]`
 - 返回结果除 `data` 外还带 `source/as_of/effective_start/effective_end/warning/data_in_result`
+- Futu provider 在 `market_ohlcv` 下默认使用不复权口径，不扩公共工具参数
 
 ### 4.3 Calculator — 计算能力（compute）
 

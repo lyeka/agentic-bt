@@ -60,6 +60,7 @@ class AgentConfig:
     market_us: str
     workspace_dir: Path
     state_dir: Path
+    market_hk: str = "yfinance"
     enable_bash: bool = True
     context_window: int = 100_000
     compact_recent_turns: int = 3
@@ -84,6 +85,7 @@ class AgentConfig:
         finnhub_api_key = os.getenv("FINNHUB_API_KEY") or None
         market_cn = os.getenv("ATHENACLAW_MARKET_CN", "yfinance")
         market_us = os.getenv("ATHENACLAW_MARKET_US", "yfinance")
+        market_hk = os.getenv("ATHENACLAW_MARKET_HK", market_us)
         workspace_dir = Path(os.getenv("ATHENACLAW_WORKSPACE", "~/.athenaclaw/workspace")).expanduser()
         state_dir = Path(os.getenv("ATHENACLAW_STATE_DIR", "~/.athenaclaw/state")).expanduser()
         enable_bash = os.getenv("ATHENACLAW_ENABLE_BASH", "1").strip().lower() not in ("0", "false", "no", "n")
@@ -109,6 +111,7 @@ class AgentConfig:
             market_us=market_us,
             workspace_dir=workspace_dir,
             state_dir=state_dir,
+            market_hk=market_hk,
             enable_bash=enable_bash,
             context_window=context_window,
             compact_recent_turns=compact_recent_turns,
@@ -209,20 +212,32 @@ def _make_adapter(name: str, config: AgentConfig) -> object:
     if name == "finnhub":
         from athenaclaw.integrations.market.finnhub import FinnhubAdapter
         return FinnhubAdapter(api_key=config.finnhub_api_key)
+    if name == "futu":
+        from athenaclaw.integrations.futu.config import FutuConfig
+        from athenaclaw.integrations.market.futu import FutuAdapter
+
+        futu_config = FutuConfig(
+            host=config.futu_host,
+            port=config.futu_port,
+            security_firm=config.futu_security_firm,
+        )
+        return FutuAdapter(config=futu_config)
     raise ValueError(f"Unknown market adapter: {name}")
 
 
 def _build_market_adapter(config: AgentConfig) -> object:
-    """构造运行时使用的市场适配器（必要时自动做 A 股/非 A 股路由）。"""
+    """构造运行时使用的市场适配器（必要时自动做 CN/HK/US 路由）。"""
     cn = _make_adapter(config.market_cn, config)
+    hk = _make_adapter(config.market_hk, config)
     us = _make_adapter(config.market_us, config)
-    if config.market_cn == config.market_us:
+    if config.market_cn == config.market_hk == config.market_us:
         return cn
 
-    from athenaclaw.integrations.market.composite import CompositeMarketAdapter, is_ashare
+    from athenaclaw.integrations.market.composite import CompositeMarketAdapter, is_ashare, is_hk_symbol
 
     composite = CompositeMarketAdapter()
     composite.route(is_ashare, cn)
+    composite.route(is_hk_symbol, hk)
     composite.fallback(us)
     return composite
 

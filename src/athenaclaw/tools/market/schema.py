@@ -18,6 +18,7 @@ VALID_INTERVALS = ("1d", "1m", "5m", "15m", "30m", "60m")
 VALID_MODES = ("history", "latest")
 MINUTE_INTERVALS = VALID_INTERVALS[1:]
 DEFAULT_CN_TIMEZONE = "Asia/Shanghai"
+DEFAULT_HK_TIMEZONE = "Asia/Hong_Kong"
 DEFAULT_US_TIMEZONE = "America/New_York"
 
 
@@ -125,9 +126,21 @@ def normalize_symbol(symbol: str) -> str:
     return value
 
 
+def market_code(symbol: str) -> str:
+    normalized = normalize_symbol(symbol)
+    if normalized.endswith((".SH", ".SZ", ".BJ")):
+        return "CN"
+    if normalized.endswith(".HK"):
+        return "HK"
+    return "US"
+
+
 def market_timezone(symbol: str) -> str:
-    if symbol.endswith((".SH", ".SZ", ".BJ")):
+    market = market_code(symbol)
+    if market == "CN":
         return DEFAULT_CN_TIMEZONE
+    if market == "HK":
+        return DEFAULT_HK_TIMEZONE
     return DEFAULT_US_TIMEZONE
 
 
