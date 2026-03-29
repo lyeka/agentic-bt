@@ -14,6 +14,13 @@ Feature: CompositeMarketAdapter — 多数据源路由
     When composite fetch history "AAPL" interval "1d"
     Then 实际调用的 adapter 是 "yfinance"
 
+  Scenario: 港股路由可独立命中 HK adapter
+    Given 注册 "tushare" adapter 匹配 A 股 symbol
+    And 注册 "futu" adapter 匹配港股 symbol
+    And 注册 "yfinance" adapter 作为 fallback
+    When composite fetch history "00700.HK" interval "1d"
+    Then 实际调用的 adapter 是 "futu"
+
   Scenario: 多条路由按注册顺序 first-match-wins
     Given 注册 "first" adapter 匹配所有 symbol
     And 注册 "second" adapter 匹配所有 symbol

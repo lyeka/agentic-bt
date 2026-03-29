@@ -12,6 +12,9 @@
 | `market_ohlcv` | 获取 OHLCV，写入 DataStore，供 `compute` 消费 |
 | `portfolio` | 维护结构化当前持仓快照 `portfolio.json` |
 | `watchlist` | 维护结构化自选列表快照 `watchlist.json` |
+| `trade_account` | 读取远端 broker 账户、持仓、未完成订单、订单状态 |
+| `trade_plan` | 生成交易执行计划，不直接产生外部副作用 |
+| `trade_apply` | 执行 `trade_plan` 生成的计划 |
 | `compute` | 在沙箱中对已加载 OHLCV 做 Python 分析 |
 | `read` | 读工作区文件 |
 | `write` | 写工作区文件 |
@@ -19,7 +22,7 @@
 | `bash` | 执行 shell 命令（按权限控制） |
 | `web_search` / `web_fetch` | 可选 Web 搜索与抓取 |
 
-其中最容易用错的是 `portfolio`、`watchlist`、`market_ohlcv` 和 `compute`。
+其中最容易用错的是 `portfolio`、`watchlist`、`trade_account`、`trade_plan`、`trade_apply`、`market_ohlcv` 和 `compute`。
 
 ## portfolio
 
@@ -54,6 +57,12 @@
 
 `memory.md` 适合长期偏好、风险边界、关注方向。
 详细持仓需要结构化读取和 UI 展示，因此单独维护在 `portfolio.json`。
+
+注意：
+
+- `portfolio` 不是远端 broker 账户
+- 使用交易工具执行远端下单/撤单后，不会自动改写 `portfolio.json`
+- 如果用户明确要把工作区快照同步到远端 broker 结果，应通过后续专门同步动作完成，而不是在 V1 自动覆盖
 
 ## watchlist
 
@@ -105,6 +114,103 @@
 `memory.md` 适合记录高层关注方向和长期偏好。
 具体自选 symbol 清单、观察理由和加入时间需要结构化读取，因此单独维护在 `watchlist.json`。
 
+## trade_account / trade_plan / trade_apply
+
+### 核心语义
+
+这三者共同组成远端 broker 交易闭环：
+
+- `trade_account`：读取远端账户状态
+- `trade_plan`：创建可确认、可审计的执行计划
+- `trade_apply`：执行计划
+
+它们不是 `portfolio` 的替代物，也不会自动维护 `portfolio.json`。
+
+### V1 边界
+
+只支持：
+
+- 股票/ETF
+- `LIMIT`
+- `BUY`
+- `SELL`
+- `CANCEL`
+
+不支持：
+
+- `MARKET`
+- `STOP`
+- `AUCTION`
+- 条件单
+- 期权/期货/融资融券/卖空
+
+### 正确用法
+
+1. 先 `trade_account.list_accounts`
+2. 再 `trade_plan.submit_limit` 或 `trade_plan.cancel`
+3. 最后 `trade_apply`
+
+不能跳过 `trade_plan` 直接执行。
+
+显式参数规则：
+
+- `trade_account.get_positions/get_summary/get_open_orders` 必须显式传 `account_ref`
+- `trade_account.get_order_status` 必须显式传 `order_ref`
+- `trade_plan.submit_limit` 必须显式传 `account_ref`
+- `trade_plan.cancel` 必须显式传 `order_ref`
+- 不会自动承接最近账户、最近订单，也不会返回 suggestion
+
+### 账户发现
+
+`trade_account.list_accounts` 不只返回 `account_ref`。V1 里它还会返回：
+
+- `supported_markets`
+- `account_status`
+- `account_kind`
+- `is_simulated`
+- `extra`
+
+其中：
+
+- 公共字段用于跨 broker 选户
+- `extra` 用于解释 provider 特有的限制或能力
+
+对 Futu 来说，`extra` 至少会包含类似 `sim_acc_type`、`trdmarket_auth`、`acc_status`、`acc_role` 这类原生账户信息。
+
+当要交易某个 symbol 时，先用这些字段判断账户是否支持目标市场、是否 active、以及是否是合适的账户类型。
+
+### 活动账户快照
+
+`trade_account.get_positions` 成功后，会把该账户快照写入 `Kernel.data["account"]`。  
+后续 `compute` 读取到的 `account/cash/equity/positions` 就来自这个当前活动账户快照。
+
+### 计划与执行返回
+
+`trade_plan.submit_limit` 返回的 plan 除了 `plan_id` 外，还会返回：
+
+- `normalized_intent`
+
+其中 `normalized_intent.limit_price` 是后续 `trade_apply` 唯一允许执行的价格。  
+如果 provider 对输入价格做了规范化，plan 的 `warnings` 里会明确写出原始价格和规范化后的价格。
+
+`trade_apply` 返回除了 `order_status` 外，还会返回：
+
+- `finalized`
+- `warnings`
+
+语义是：
+
+- `status=ok` 只表示工具执行成功
+- `finalized=true` 才表示该次交易动作已确认进入终态
+- 撤单后如果短时确认不到终态，会返回 `finalized=false`，并在 `warnings` 中给出 `cancel_requested_not_finalized`
+
+### 缺参错误
+
+缺少 ref 时，不再返回 `invalid_*`，而是：
+
+- 缺少 `account_ref`：`missing_account_ref`
+- 缺少 `order_ref`：`missing_order_ref`
+
 ## market_ohlcv
 
 ### 请求协议
@@ -122,7 +228,7 @@
 
 字段语义：
 
-- `symbol`: 标的代码。A 股内部统一归一化为 `.SH/.SZ/.BJ`，`yfinance` 出站时会把 `.SH` 转成 `.SS`
+- `symbol`: 标的代码。支持美股、港股和 A 股。A 股内部统一归一化为 `.SH/.SZ/.BJ`，`yfinance` 出站时会把 `.SH` 转成 `.SS`
 - `interval`: bar 粒度，只能是 `1d | 1m | 5m | 15m | 30m | 60m`
 - `mode`:
   - `history`: 返回一段 OHLCV
@@ -143,6 +249,8 @@
 - `mode="latest"` 不是“交易所实时流”，而是“数据源当前最新可用的一根 bar”
 - `mode="latest"` 禁止传 `start/end`
 - `interval="1d"` 禁止配 `mode="latest"`
+- 当前 provider 可为 `tushare | yfinance | finnhub | futu`
+- `futu` 这一版默认使用**不复权**口径，不暴露 `autype/session/extended_time` 公共参数
 - 日线 `start/end` 用 `YYYY-MM-DD`
 - 分钟 `start/end` 用 `YYYY-MM-DD HH:MM:SS`
 - `include_data_in_result` 只控制返回 JSON 是否带 `data`，不影响 fetch、DataStore 注入和后续 `compute`

@@ -246,7 +246,7 @@ class InvestmentApp(App):
 
         app = self
 
-        def _confirm(path: str) -> bool:
+        def _confirm(message: str) -> bool:
             event = threading.Event()
             result: list[bool] = [False]
 
@@ -255,7 +255,7 @@ class InvestmentApp(App):
                 event.set()
 
             def _push() -> None:
-                app.push_screen(ConfirmScreen(path), callback=_on_result)
+                app.push_screen(ConfirmScreen(str(message)), callback=_on_result)
 
             app.call_from_thread(_push)
             if not event.wait(timeout=60):

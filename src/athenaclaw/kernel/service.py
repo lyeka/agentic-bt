@@ -66,6 +66,7 @@ memory.md — 你关于用户和世界的长期记忆。
 portfolio.json — 用户的结构化当前持仓快照。
   ✅ 写入：账户、币种现金、当前持仓、更新时间
   ✅ 触发：用户发完整持仓截图、直接给出当前持仓，或明确说某笔已执行交易后当前仓位变了
+  ✅ 例外：如果这次变化来自 trade_account/trade_plan/trade_apply 等远端 broker 工具，不自动改写 portfolio.json；只有用户明确要求同步工作区快照时才更新
   ❌ 不写：想买/想卖的计划、watchlist、模糊推测、不完整截图
   组织：单文件 JSON，按账户维护当前状态，不记录交易历史。
   读取：当任务涉及仓位分析、风险分析、集中度、相关性、个性化建议时，优先调用 portfolio 工具读取。
@@ -161,6 +162,22 @@ AUTOMATION_GUIDE = """\
    }
    这会按当前任务定义立即执行一次，不会修改原定时计划。
 </automation_tools>"""
+
+TRADE_GUIDE = """\
+<trade_tools>
+当你要读取或执行远端 broker 交易动作时，严格遵循以下规则：
+
+1. 远端 broker 账户不等于 portfolio.json。portfolio.json 是工作区快照，不会被交易工具自动改写。
+2. 读取远端账户状态时，用 trade_account，不要猜账户，也不要把远端账户内容写成 portfolio.json。
+3. 所有执行动作必须先 trade_plan，再 trade_apply。不要直接调用 trade_apply，也不要把原始下单参数传给 trade_apply。
+4. V1 只支持股票/ETF 的 LIMIT 限价单，以及撤销未完成订单。不支持 market/stop/条件单/衍生品。
+5. account_ref/order_ref/plan_id 都是系统返回的 opaque 引用。只能传递，不能猜测、拼接或修改。
+6. 在 trade_apply 返回成功之前，不能告诉用户“已提交”“已成交”。
+7. 下单前先看 trade_account.list_accounts 返回的 supported_markets、account_status、account_kind；优先选择 account_status=active 且支持目标市场、类型适合股票/ETF 的账户。extra 是 provider 信息层，可用于解释限制，但不是通用契约。
+8. 除 list_accounts 外，读取具体账户或订单时必须显式携带 account_ref 或 order_ref。不要省略，也不要假设系统会自动承接最近账户或最近订单。
+9. 没有同 broker 的新鲜行情或明确 market-state 证据时，不得推断“更容易成交”“当前处于常规交易时段”。类似 session=RTH 只能理解为订单会话语义，不能理解为当前市场状态。
+10. trade_account.get_positions 成功后，会把当前活动账户快照写入 Kernel.data['account']，供后续 compute 使用；这个 account 只代表当前活动账户，不是多账户容器。
+</trade_tools>"""
 
 EVOLUTION_GUIDE = """\
 <evolution>
@@ -402,6 +419,8 @@ class Kernel:
             from athenaclaw.kernel.seed import SEED_PROMPT
             identity = SEED_PROMPT
         parts = [identity, WORKSPACE_GUIDE, AUTOMATION_GUIDE]
+        if {"trade_account", "trade_plan", "trade_apply"} & set(self._tools):
+            parts.append(TRADE_GUIDE)
         runtime_paths_xml = self._runtime_paths_prompt()
         if runtime_paths_xml:
             parts.append(runtime_paths_xml)
@@ -799,7 +818,7 @@ class Kernel:
         return Permission.FREE
 
     def on_confirm(self, handler: Callable[[str], bool]) -> None:
-        """注册确认回调（CLI 弹 y/n 等）"""
+        """注册确认回调（参数为可读确认消息）"""
         self._confirm_handler = handler
 
     def set_tool_policy(self, policy: ToolAccessPolicy | None) -> None:
@@ -810,11 +829,11 @@ class Kernel:
         """返回当前单轮执行上下文。"""
         return self._execution_context
 
-    def request_confirm(self, path: str) -> bool:
+    def request_confirm(self, message: str) -> bool:
         """请求用户确认。无 handler 时默认放行（yolo）"""
         if self._confirm_handler is None:
             return True
-        return self._confirm_handler(path)
+        return self._confirm_handler(message)
 
     # ── 声明式管道 ────────────────────────────────────────────────────────────
 

@@ -25,8 +25,8 @@ def make_sync_confirm(
     此函数用于在 worker 线程中阻塞等待 IM 用户确认。
     """
 
-    def _confirm(path: str) -> bool:
-        coro = backend.ask_confirm(conversation_id, f"确认操作 {path}?", timeout_sec=timeout_sec)
+    def _confirm(message: str) -> bool:
+        coro = backend.ask_confirm(conversation_id, str(message), timeout_sec=timeout_sec)
         fut = asyncio.run_coroutine_threadsafe(coro, loop)
         try:
             return bool(fut.result(timeout=timeout_sec + 5))
@@ -35,4 +35,3 @@ def make_sync_confirm(
             return False
 
     return _confirm
-

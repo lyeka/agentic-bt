@@ -33,7 +33,7 @@ def check_trust(kernel: object, path: Path, workspace: Path, cwd: Path) -> str |
         return None
     from athenaclaw.kernel import Permission
     if kernel.check_permission("__external__") == Permission.USER_CONFIRM:
-        if not kernel.request_confirm(str(path)):
+        if not kernel.request_confirm(f"确认访问外部路径 {path} 吗？"):
             return f"访问被拒绝: {path}"
     return None
 
@@ -46,6 +46,6 @@ def check_write_permission(kernel: object, raw: str, path: Path, workspace: Path
     if is_trusted(path, workspace, cwd):
         from athenaclaw.kernel import Permission
         level = kernel.check_permission(raw)
-        if level == Permission.USER_CONFIRM and not kernel.request_confirm(raw):
+        if level == Permission.USER_CONFIRM and not kernel.request_confirm(f"确认写入 {raw} 吗？"):
             return "需要用户确认"
     return None

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from importlib import import_module
 
-__all__ = ["bash", "compute", "edit", "market", "portfolio", "read", "shell", "watchlist", "web", "write"]
+__all__ = ["bash", "compute", "edit", "market", "portfolio", "read", "shell", "trade", "watchlist", "web", "write"]
 
 _EXPORTS = {
     "bash": ("athenaclaw.tools.shell.tool", None),
@@ -12,6 +12,7 @@ _EXPORTS = {
     "portfolio": ("athenaclaw.tools.portfolio.tool", None),
     "read": ("athenaclaw.tools.filesystem.read", None),
     "shell": ("athenaclaw.tools.shell.tool", None),
+    "trade": ("athenaclaw.tools.trade.tool", None),
     "watchlist": ("athenaclaw.tools.watchlist.tool", None),
     "web": ("athenaclaw.tools.web.tool", None),
     "write": ("athenaclaw.tools.filesystem.write", None),

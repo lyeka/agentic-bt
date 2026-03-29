@@ -19,7 +19,8 @@ from athenaclaw.automation.store import AutomationStore
 from athenaclaw.automation import tools as automation_tools
 from athenaclaw.llm.providers import LLMProvider, OpenAIChatProvider
 from athenaclaw.runtime.session_store import JsonSessionStore, SessionStore
-from athenaclaw.tools import bash, compute, edit, market, portfolio, read, watchlist, web, write
+from athenaclaw.tools import bash, compute, edit, market, portfolio, read, trade, watchlist, web, write
+from athenaclaw.trading import TradeAuditLog, TradeOrchestrator, TradePlanStore
 from athenaclaw.subagents import SubAgentDef
 
 
@@ -59,6 +60,7 @@ class AgentConfig:
     market_us: str
     workspace_dir: Path
     state_dir: Path
+    market_hk: str = "yfinance"
     enable_bash: bool = True
     context_window: int = 100_000
     compact_recent_turns: int = 3
@@ -69,6 +71,10 @@ class AgentConfig:
     subagents: list[SubAgentDef] | None = None
     automation_default_timezone: str = "Asia/Shanghai"
     automation_task_scan_sec: int = 30
+    trade_broker: str | None = None
+    futu_host: str = "127.0.0.1"
+    futu_port: int = 11111
+    futu_security_firm: str | None = None
 
     @classmethod
     def from_env(cls) -> AgentConfig:
@@ -79,6 +85,7 @@ class AgentConfig:
         finnhub_api_key = os.getenv("FINNHUB_API_KEY") or None
         market_cn = os.getenv("ATHENACLAW_MARKET_CN", "yfinance")
         market_us = os.getenv("ATHENACLAW_MARKET_US", "yfinance")
+        market_hk = os.getenv("ATHENACLAW_MARKET_HK", market_us)
         workspace_dir = Path(os.getenv("ATHENACLAW_WORKSPACE", "~/.athenaclaw/workspace")).expanduser()
         state_dir = Path(os.getenv("ATHENACLAW_STATE_DIR", "~/.athenaclaw/state")).expanduser()
         enable_bash = os.getenv("ATHENACLAW_ENABLE_BASH", "1").strip().lower() not in ("0", "false", "no", "n")
@@ -90,6 +97,10 @@ class AgentConfig:
         image_detail = (os.getenv("ATHENACLAW_IMAGE_DETAIL") or "low").strip().lower() or "low"
         automation_default_timezone = os.getenv("ATHENACLAW_AUTOMATION_DEFAULT_TIMEZONE", "Asia/Shanghai")
         automation_task_scan_sec = int(os.getenv("ATHENACLAW_AUTOMATION_TASK_SCAN_SEC", "30"))
+        trade_broker = os.getenv("ATHENACLAW_TRADE_BROKER") or None
+        futu_host = os.getenv("ATHENACLAW_FUTU_HOST", "127.0.0.1")
+        futu_port = int(os.getenv("ATHENACLAW_FUTU_PORT", "11111"))
+        futu_security_firm = os.getenv("ATHENACLAW_FUTU_SECURITY_FIRM") or None
         return cls(
             model=model,
             base_url=base_url,
@@ -100,6 +111,7 @@ class AgentConfig:
             market_us=market_us,
             workspace_dir=workspace_dir,
             state_dir=state_dir,
+            market_hk=market_hk,
             enable_bash=enable_bash,
             context_window=context_window,
             compact_recent_turns=compact_recent_turns,
@@ -109,6 +121,10 @@ class AgentConfig:
             image_detail=image_detail,
             automation_default_timezone=automation_default_timezone,
             automation_task_scan_sec=automation_task_scan_sec,
+            trade_broker=trade_broker,
+            futu_host=futu_host,
+            futu_port=futu_port,
+            futu_security_firm=futu_security_firm,
         )
 
 
@@ -196,22 +212,50 @@ def _make_adapter(name: str, config: AgentConfig) -> object:
     if name == "finnhub":
         from athenaclaw.integrations.market.finnhub import FinnhubAdapter
         return FinnhubAdapter(api_key=config.finnhub_api_key)
+    if name == "futu":
+        from athenaclaw.integrations.futu.config import FutuConfig
+        from athenaclaw.integrations.market.futu import FutuAdapter
+
+        futu_config = FutuConfig(
+            host=config.futu_host,
+            port=config.futu_port,
+            security_firm=config.futu_security_firm,
+        )
+        return FutuAdapter(config=futu_config)
     raise ValueError(f"Unknown market adapter: {name}")
 
 
 def _build_market_adapter(config: AgentConfig) -> object:
-    """构造运行时使用的市场适配器（必要时自动做 A 股/非 A 股路由）。"""
+    """构造运行时使用的市场适配器（必要时自动做 CN/HK/US 路由）。"""
     cn = _make_adapter(config.market_cn, config)
+    hk = _make_adapter(config.market_hk, config)
     us = _make_adapter(config.market_us, config)
-    if config.market_cn == config.market_us:
+    if config.market_cn == config.market_hk == config.market_us:
         return cn
 
-    from athenaclaw.integrations.market.composite import CompositeMarketAdapter, is_ashare
+    from athenaclaw.integrations.market.composite import CompositeMarketAdapter, is_ashare, is_hk_symbol
 
     composite = CompositeMarketAdapter()
     composite.route(is_ashare, cn)
+    composite.route(is_hk_symbol, hk)
     composite.fallback(us)
     return composite
+
+
+def _build_trade_adapter(config: AgentConfig) -> object | None:
+    if not config.trade_broker:
+        return None
+    if config.trade_broker == "futu":
+        from athenaclaw.integrations.futu.config import FutuTradeConfig
+        from athenaclaw.integrations.futu.trade_adapter import FutuTradeAdapter
+
+        futu_config = FutuTradeConfig(
+            host=config.futu_host,
+            port=config.futu_port,
+            security_firm=config.futu_security_firm,
+        )
+        return FutuTradeAdapter(config=futu_config)
+    raise ValueError(f"Unknown trade adapter: {config.trade_broker}")
 
 
 def _build_automation_delivery_channels() -> dict[str, object]:
@@ -270,6 +314,14 @@ def build_kernel_bundle(
     compute.register(kernel)
     portfolio.register(kernel, workspace)
     watchlist.register(kernel, workspace)
+    trade_adapter = _build_trade_adapter(config)
+    if trade_adapter is not None:
+        orchestrator = TradeOrchestrator(
+            adapter=trade_adapter,
+            plan_store=TradePlanStore(state),
+            audit_log=TradeAuditLog(state),
+        )
+        trade.register(kernel, orchestrator)
     read.register(kernel, workspace, cwd=cwd)
     write.register(kernel, workspace, cwd=cwd)
     edit.register(kernel, workspace, cwd=cwd)

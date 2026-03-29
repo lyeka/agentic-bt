@@ -8,7 +8,7 @@ from athenaclaw.kernel.models import (
     ToolAccessPolicy,
     ToolDef,
 )
-from athenaclaw.kernel.prompts import AUTOMATION_GUIDE, SEED_PROMPT, WORKSPACE_GUIDE
+from athenaclaw.kernel.prompts import AUTOMATION_GUIDE, SEED_PROMPT, TRADE_GUIDE, WORKSPACE_GUIDE
 from athenaclaw.kernel.service import Kernel
 
 __all__ = [
@@ -21,6 +21,7 @@ __all__ = [
     "Permission",
     "SEED_PROMPT",
     "Session",
+    "TRADE_GUIDE",
     "ToolAccessPolicy",
     "ToolDef",
     "WORKSPACE_GUIDE",

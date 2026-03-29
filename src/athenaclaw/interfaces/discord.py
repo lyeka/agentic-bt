@@ -462,9 +462,16 @@ def main() -> None:
     intents.message_content = True
     intents.messages = True
 
+    proxy_url = (
+        os.getenv("https_proxy")
+        or os.getenv("HTTPS_PROXY")
+        or os.getenv("http_proxy")
+        or os.getenv("HTTP_PROXY")
+    )
+
     class AgentDiscordClient(discord.Client):
         def __init__(self) -> None:
-            super().__init__(intents=intents)
+            super().__init__(intents=intents, proxy=proxy_url)
             backend = DiscordBackend(client=self)
             self._backend = backend
             self._driver = IMDriver(

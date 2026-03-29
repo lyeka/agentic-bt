@@ -15,7 +15,7 @@ from textual.widgets import Button, Label
 
 
 class ConfirmScreen(ModalScreen[bool]):
-    """文件写入确认对话框。返回 True（确认）或 False（拒绝）。"""
+    """通用确认对话框。返回 True（确认）或 False（拒绝）。"""
 
     DEFAULT_CSS = """
     ConfirmScreen {
@@ -46,13 +46,13 @@ class ConfirmScreen(ModalScreen[bool]):
         Binding("escape", "deny", "取消", show=False),
     ]
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, message: str) -> None:
         super().__init__()
-        self.path = path
+        self.message = message
 
     def compose(self) -> ComposeResult:
         with Vertical(id="confirm-dialog"):
-            yield Label(f"确认写入 [bold]{self.path}[/bold] ?", id="confirm-prompt")
+            yield Label(self.message, id="confirm-prompt")
             with Horizontal(id="confirm-buttons"):
                 yield Button("确认 (y)", variant="primary", id="btn-yes")
                 yield Button("取消 (n)", variant="default", id="btn-no")

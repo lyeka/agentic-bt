@@ -11,7 +11,7 @@ import pandas as pd
 import pytest
 from pytest_bdd import given, parsers, scenario, then, when
 
-from athenaclaw.integrations.market.composite import CompositeMarketAdapter, is_ashare
+from athenaclaw.integrations.market.composite import CompositeMarketAdapter, is_ashare, is_hk_symbol
 from athenaclaw.tools.market.schema import build_market_query, make_fetch_result
 
 
@@ -28,6 +28,10 @@ def test_route_match(): pass
 
 @scenario(FEATURE, "无匹配路由走 fallback")
 def test_route_fallback(): pass
+
+
+@scenario(FEATURE, "港股路由可独立命中 HK adapter")
+def test_hk_route(): pass
 
 
 @scenario(FEATURE, "多条路由按注册顺序 first-match-wins")
@@ -80,6 +84,13 @@ def given_ashare_route(mrctx, name):
     adapter = FakeAdapter(name)
     mrctx["adapters"][name] = adapter
     mrctx["composite"].route(is_ashare, adapter)
+
+
+@given(parsers.parse('注册 "{name}" adapter 匹配港股 symbol'))
+def given_hk_route(mrctx, name):
+    adapter = FakeAdapter(name)
+    mrctx["adapters"][name] = adapter
+    mrctx["composite"].route(is_hk_symbol, adapter)
 
 
 @given(parsers.parse('注册 "{name}" adapter 作为 fallback'))
