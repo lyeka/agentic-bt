@@ -15,6 +15,8 @@ from urllib import request
 from athenaclaw.interfaces.im.text import chunk_text
 from athenaclaw.automation.models import DeliveryReceipt
 
+DEFAULT_HTTP_USER_AGENT = "OpenClawAutomation/1.0"
+
 
 class DeliveryChannel(Protocol):
     def send(
@@ -67,7 +69,15 @@ class TelegramDeliveryChannel:
     def _send_via_http(self, target: str, text: str) -> str:
         url = f"https://api.telegram.org/bot{self._bot_token}/sendMessage"
         payload = json.dumps({"chat_id": int(target), "text": text}).encode("utf-8")
-        req = request.Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        req = request.Request(
+            url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": DEFAULT_HTTP_USER_AGENT,
+            },
+            method="POST",
+        )
         with request.urlopen(req, timeout=15) as resp:  # pragma: no cover - integration path
             data = json.loads(resp.read().decode("utf-8"))
         return str(data.get("result", {}).get("message_id", "unknown"))
@@ -118,6 +128,7 @@ class DiscordDeliveryChannel:
             headers={
                 "Authorization": f"Bot {self._bot_token}",
                 "Content-Type": "application/json",
+                "User-Agent": DEFAULT_HTTP_USER_AGENT,
             },
             method="POST",
         )
@@ -166,7 +177,15 @@ class WebhookDeliveryChannel:
 
     def _send_via_http(self, target: str, payload: dict[str, Any]) -> str:
         body = json.dumps(payload).encode("utf-8")
-        req = request.Request(target, data=body, headers={"Content-Type": "application/json"}, method="POST")
+        req = request.Request(
+            target,
+            data=body,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": DEFAULT_HTTP_USER_AGENT,
+            },
+            method="POST",
+        )
         with request.urlopen(req, timeout=15) as resp:  # pragma: no cover - integration path
             resp.read()
         return "webhook"

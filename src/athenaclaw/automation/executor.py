@@ -50,16 +50,15 @@ class AutomationExecutor:
         started_at = utc_now_iso()
         receipts = []
 
-        if task.delivery.pre_alert.enabled:
-            receipts.extend(self._deliver(
-                phase=task.delivery.pre_alert,
-                task=task,
-                run_id=run_id,
-                kind="pre_alert",
-                text=self._render_pre_alert(task, event),
-            ))
-
         try:
+            if task.delivery.pre_alert.enabled:
+                receipts.extend(self._deliver(
+                    phase=task.delivery.pre_alert,
+                    task=task,
+                    run_id=run_id,
+                    kind="pre_alert",
+                    text=self._render_pre_alert(task, event),
+                ))
             result_text = self._run_reaction(task, event)
             artifact_path = self._write_artifact(task, run_id, result_text)
             if task.delivery.final_result.enabled:
@@ -87,14 +86,20 @@ class AutomationExecutor:
             self._store.save_run(run)
             return run
         except Exception as exc:
+            error_text = f"{type(exc).__name__}: {exc}"
             if task.delivery.on_failure.enabled:
-                receipts.extend(self._deliver(
-                    phase=task.delivery.on_failure,
-                    task=task,
-                    run_id=run_id,
-                    kind="failure",
-                    text=f"自动化任务失败\n\n任务: {task.name}\nrun_id: {run_id}\n错误: {type(exc).__name__}: {exc}",
-                ))
+                try:
+                    receipts.extend(self._deliver(
+                        phase=task.delivery.on_failure,
+                        task=task,
+                        run_id=run_id,
+                        kind="failure",
+                        text=f"自动化任务失败\n\n任务: {task.name}\nrun_id: {run_id}\n错误: {error_text}",
+                    ))
+                except Exception as notify_exc:
+                    error_text = (
+                        f"{error_text}; failure_delivery={type(notify_exc).__name__}: {notify_exc}"
+                    )
             run = TaskRun(
                 run_id=run_id,
                 task_id=task.id,
@@ -106,7 +111,7 @@ class AutomationExecutor:
                 started_at=started_at,
                 finished_at=utc_now_iso(),
                 delivery_receipts=tuple(receipts),
-                error=f"{type(exc).__name__}: {exc}",
+                error=error_text,
             )
             self._store.save_run(run)
             return run

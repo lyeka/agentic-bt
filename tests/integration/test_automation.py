@@ -5,8 +5,10 @@ from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
+from athenaclaw.automation import delivery as delivery_module
 from athenaclaw.tools.market.schema import build_market_query, make_fetch_result
 from athenaclaw.automation.delivery import DiscordDeliveryChannel, TelegramDeliveryChannel, WebhookDeliveryChannel
+from athenaclaw.automation.executor import AutomationExecutor
 from athenaclaw.automation.models import (
     TaskRun,
     TriggerEvent,
@@ -20,7 +22,7 @@ from athenaclaw.automation.tools import register as register_automation_tools
 from athenaclaw.automation.worker import AutomationWorker, _build_delivery_channels as _build_worker_delivery_channels
 from athenaclaw.kernel import ExecutionContext, Kernel
 from athenaclaw.llm.messages import ContextRef
-from athenaclaw.runtime import _build_automation_delivery_channels
+from athenaclaw.runtime import AgentConfig, _build_automation_delivery_channels
 from athenaclaw.tools import edit, write
 
 
@@ -431,6 +433,119 @@ def test_delivery_channels_chunk_long_messages_into_multiple_receipts():
         kind="final_result",
     )
     assert len(webhook_receipts) == 1
+
+
+def test_discord_http_delivery_sets_custom_user_agent(monkeypatch):
+    seen: dict[str, str | None] = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self) -> bytes:
+            return b'{"id":"msg-1"}'
+
+    def _fake_urlopen(req, timeout):
+        seen["user_agent"] = req.get_header("User-agent")
+        seen["authorization"] = req.get_header("Authorization")
+        seen["timeout"] = str(timeout)
+        return _Response()
+
+    monkeypatch.setattr(delivery_module.request, "urlopen", _fake_urlopen)
+
+    discord = DiscordDeliveryChannel(bot_token="token")
+    message_id = discord._send_via_http("67890", "hello")
+
+    assert message_id == "msg-1"
+    assert seen["user_agent"] == delivery_module.DEFAULT_HTTP_USER_AGENT
+    assert seen["authorization"] == "Bot token"
+    assert seen["timeout"] == "15"
+
+
+def test_executor_persists_failed_run_when_delivery_and_failure_notice_both_fail(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspace"
+    state = tmp_path / "state"
+    store = AutomationStore(workspace=workspace, state=state)
+    now = utc_now_iso()
+    task = parse_task_definition(
+        {
+            "id": "delivery-failure-task",
+            "name": "delivery-failure-task",
+            "description": "exercise failed delivery path",
+            "status": "active",
+            "trigger": {
+                "type": "cron",
+                "cron_expr": "*/10 * * * *",
+                "timezone": "Asia/Shanghai",
+            },
+            "reaction": {
+                "executor": {"type": "main_agent"},
+                "prompt_template": "Send a short update.",
+            },
+            "delivery": {
+                "final_result": {
+                    "enabled": True,
+                    "channels": [{"type": "discord", "target": "67890"}],
+                },
+                "on_failure": {
+                    "enabled": True,
+                    "channels": [{"type": "discord", "target": "67890"}],
+                },
+            },
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+
+    config = AgentConfig(
+        model="test",
+        base_url=None,
+        api_key="test",
+        tushare_token=None,
+        finnhub_api_key=None,
+        market_cn="yfinance",
+        market_us="yfinance",
+        workspace_dir=workspace,
+        state_dir=state,
+    )
+
+    class _BrokenDiscord:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def send(self, *, target: str, text: str, task_id: str, run_id: str, kind: str):
+            self.calls += 1
+            raise RuntimeError("discord blocked")
+
+    backend = _BrokenDiscord()
+    executor = AutomationExecutor(
+        config=config,
+        store=store,
+        delivery_channels={"discord": backend},
+    )
+    monkeypatch.setattr(executor, "_run_reaction", lambda task, event: "hello from automation")
+
+    event = TriggerEvent(
+        event_key="cron:2026-03-29T12:40:00+00:00",
+        task_id=task.id,
+        trigger_type="cron",
+        payload={"scheduled_at": "2026-03-29T12:40:00+00:00"},
+        triggered_at="2026-03-29T12:40:01+00:00",
+    )
+
+    run = executor.execute(task, event)
+    stored = store.load_run(task.id, run.run_id)
+
+    assert backend.calls == 2
+    assert run.status == "failed"
+    assert "discord blocked" in (run.error or "")
+    assert "failure_delivery=RuntimeError: discord blocked" in (run.error or "")
+    assert stored is not None
+    assert stored.status == "failed"
+    assert stored.run_id == run.run_id
 
 
 def test_runtime_and_worker_register_discord_delivery_channel_from_env(monkeypatch):
