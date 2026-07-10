@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import traceback
 from collections import defaultdict
 from datetime import datetime
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from typing import Any, Callable, Protocol
 
 from athenaclaw.llm.messages import ContextRef, TurnInput, build_user_message, ensure_turn_input, normalize_history, render_turn_input
 from athenaclaw.llm.providers import LLMProvider, LLMResult, LLMToolCall, OpenAIChatProvider
+from athenaclaw.llm.retry import call_with_retry
 from athenaclaw.skills import (
     Skill,
     build_available_skills_prompt,
@@ -356,11 +358,17 @@ class Kernel:
         max_rounds: int = 15,
         context_window: int = 100_000,
         compact_recent_turns: int = 3,
+        llm_max_attempts: int = 3,
+        llm_base_delay: float = 1.0,
+        llm_timeout_sec: float | None = 60.0,
     ) -> None:
         self.model = model
         self.max_rounds = max_rounds
         self.context_window = context_window
         self.compact_recent_turns = compact_recent_turns
+        self.llm_max_attempts = llm_max_attempts
+        self.llm_base_delay = llm_base_delay
+        self.llm_timeout_sec = llm_timeout_sec
         self.provider = provider or OpenAIChatProvider(
             base_url=base_url,
             api_key=api_key,
@@ -861,23 +869,33 @@ class Kernel:
         """LLM 调用统一入口：stream / 非 stream 双轨，返回统一 LLMResult。"""
         self.emit("llm.call.start", {"round": round_num})
 
-        try:
-            if self.stream and self.client is not None:
+        if self.stream and self.client is not None:
+            try:
                 result = self._stream_complete(
                     model=model, messages=messages,
                     tools=tools, round_num=round_num,
                 )
-            else:
-                result = self.provider.complete(
-                    model=model, messages=messages, tools=tools,
-                )
-        except Exception as exc:
-            self.emit("llm.call.error", {
-                "round": round_num,
-                "error_type": type(exc).__name__,
-                "error": str(exc),
-            })
-            raise
+            except Exception as exc:
+                self.emit("llm.call.error", {
+                    "round": round_num,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                })
+                raise
+        else:
+            result = call_with_retry(
+                provider=self.provider,
+                model=model,
+                messages=messages,
+                tools=tools,
+                timeout=self.llm_timeout_sec,
+                attempts=self.llm_max_attempts,
+                base_delay=self.llm_base_delay,
+                emit_fn=self.emit,
+                emit_prefix="llm",
+                emit_context={"round": round_num},
+                reraise_on_exhaustion=True,
+            )
 
         self.emit("llm.call.done", {
             "round": round_num,
@@ -969,6 +987,13 @@ class Kernel:
         try:
             return tool_def.handler(args)
         except Exception as exc:
+            self.emit("tool.error", {
+                "name": name,
+                "args": args,
+                "error_type": type(exc).__name__,
+                "error": str(exc),
+                "traceback": traceback.format_exc(),
+            })
             return {"error": f"{type(exc).__name__}: {exc}"}
 
     # ── ReAct loop ────────────────────────────────────────────────────────────
@@ -1044,6 +1069,12 @@ class Kernel:
                     "summary_chars": len(result.summary),
                     "summary": result.summary,
                 })
+                if result.degraded:
+                    self.emit("compaction.degraded", {
+                        "trigger": "auto",
+                        "messages_compressed": result.compressed_count,
+                        "reason": "llm_compress_failed",
+                    })
                 # 重建 prefix（摘要可能已变）
                 system_content = self._system_prompt or ""
                 if session.summary:
@@ -1096,6 +1127,12 @@ class Kernel:
                         "messages_retained": result.retained_count,
                         "summary": result.summary,
                     })
+                    if result.degraded:
+                        self.emit("compaction.degraded", {
+                            "trigger": "overflow",
+                            "messages_compressed": result.compressed_count,
+                            "reason": "llm_compress_failed",
+                        })
                     # 重建 prefix
                     system_content = self._system_prompt or ""
                     if session.summary:
@@ -1115,8 +1152,20 @@ class Kernel:
                     for tc in response.tool_calls:
                         try:
                             args = json.loads(tc.arguments)
-                        except json.JSONDecodeError:
-                            args = {}
+                        except json.JSONDecodeError as exc:
+                            self.emit("tool.args.invalid", {
+                                "name": tc.name,
+                                "raw_arguments": tc.arguments,
+                                "error": str(exc),
+                            })
+                            session.history.append({
+                                "role": "tool",
+                                "tool_call_id": tc.id,
+                                "content": json.dumps(
+                                    {"error": f"工具参数不是合法 JSON: {exc}"}, default=str,
+                                ),
+                            })
+                            continue
                         self.emit(
                             "tool.call.start",
                             {"name": tc.name, "args": args},
@@ -1141,7 +1190,19 @@ class Kernel:
                         })
             else:
                 # max_rounds 耗尽
-                reply = f"[max_rounds={self.max_rounds} 耗尽]"
+                last_content = ""
+                for msg in reversed(session.history):
+                    if msg.get("role") == "assistant" and msg.get("content"):
+                        last_content = str(msg["content"])
+                        break
+                reply = (
+                    f"已达到本轮最大工具调用轮数（{self.max_rounds}），任务未完全完成。"
+                    + (f"\n\n最后进展：\n{last_content}" if last_content else "")
+                )
+                self.emit("turn.exhausted", {
+                    "max_rounds": self.max_rounds,
+                    "last_content": last_content,
+                })
                 session.history.append({"role": "assistant", "content": reply})
 
             self.emit("turn.done", {"input": render_turn_input(turn_input), "reply": reply})

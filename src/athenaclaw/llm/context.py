@@ -1,7 +1,7 @@
 """
 [INPUT]: json, dataclasses, typing, agent.messages, agent.providers
-[OUTPUT]: estimate_tokens, ContextInfo, context_info, CompactResult, compact_history
-[POS]: 上下文管理纯函数层，零框架依赖，被 Kernel 和适配器调用
+[OUTPUT]: estimate_tokens, ContextInfo, context_info, CompactResult（含 degraded 标记）, compact_history
+[POS]: 上下文管理纯函数层，零框架依赖，被 Kernel 和适配器调用。LLM 压缩失败时降级为确定性截断而非静默丢弃历史，由 Kernel 据 degraded 标记发 compaction.degraded 事件
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -96,6 +96,10 @@ class CompactResult:
     retained: list[dict]
     compressed_count: int
     retained_count: int
+    degraded: bool = False
+
+
+_DETERMINISTIC_SUMMARY_MAX_CHARS = 4000
 
 
 def compact_history(
@@ -129,32 +133,46 @@ def compact_history(
     to_compress = history[:cut]
     retained = history[cut:]
 
-    # LLM 压缩（含 fallback）
+    # LLM 压缩；失败时退化为确定性截断，绝不静默丢弃历史
     use_provider = provider or OpenAIChatProvider(client=client)
-    summary = _llm_compress(use_provider, model, to_compress)
+    try:
+        summary = _llm_compress(use_provider, model, to_compress)
+        degraded = False
+    except Exception:
+        summary = _deterministic_summary(to_compress)
+        degraded = True
 
     return CompactResult(
         summary=summary,
         retained=list(retained),
         compressed_count=len(to_compress),
         retained_count=len(retained),
+        degraded=degraded,
     )
 
 
 def _llm_compress(provider: object, model: str, messages: list[dict]) -> str:
-    """调用 LLM 压缩消息段，失败时退化为空摘要（等同截断）"""
+    """调用 LLM 压缩消息段，失败时抛出异常，交由调用方决定降级策略"""
     conversation_text = "\n".join(
         f"[{m.get('role', '?')}]: {extract_text(m)}" for m in normalize_history(messages)
     )
-    try:
-        response = provider.complete(  # type: ignore[union-attr]
-            model=model,
-            messages=[
-                {"role": "system", "content": _COMPRESS_PROMPT},
-                {"role": "user", "content": conversation_text},
-            ],
-        )
-        return str(response.assistant_message.get("content") or "")
-    except Exception:
-        # LLM 失败 → 退化为截断，丢弃旧消息
-        return ""
+    response = provider.complete(  # type: ignore[union-attr]
+        model=model,
+        messages=[
+            {"role": "system", "content": _COMPRESS_PROMPT},
+            {"role": "user", "content": conversation_text},
+        ],
+    )
+    return str(response.assistant_message.get("content") or "")
+
+
+def _deterministic_summary(messages: list[dict]) -> str:
+    """LLM 压缩失败时的确定性降级：逐条拼接文本摘录并截断，保证历史不被静默丢弃"""
+    lines = [
+        f"[{m.get('role', '?')}]: {extract_text(m)}"
+        for m in normalize_history(messages)
+    ]
+    body = "\n".join(lines)
+    if len(body) > _DETERMINISTIC_SUMMARY_MAX_CHARS:
+        body = body[:_DETERMINISTIC_SUMMARY_MAX_CHARS] + "\n...(截断)"
+    return "## 降级摘要（LLM 压缩失败，以下为确定性截断，非结构化摘要）\n\n" + body

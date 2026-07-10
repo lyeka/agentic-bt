@@ -65,6 +65,9 @@ class AgentConfig:
     context_window: int = 100_000
     compact_recent_turns: int = 3
     session_keep_last_user_messages: int = 20
+    llm_max_attempts: int = 3
+    llm_base_delay: float = 1.0
+    llm_timeout_sec: float | None = 60.0
     search_provider: str = "tavily"
     tavily_api_key: str | None = None
     image_detail: str = "low"
@@ -92,6 +95,10 @@ class AgentConfig:
         context_window = int(os.getenv("ATHENACLAW_CONTEXT_WINDOW", "100000"))
         compact_recent_turns = int(os.getenv("ATHENACLAW_COMPACT_RECENT_TURNS", "3"))
         session_keep_last = int(os.getenv("ATHENACLAW_SESSION_KEEP_LAST_USER_MESSAGES", "20"))
+        llm_max_attempts = int(os.getenv("ATHENACLAW_LLM_MAX_ATTEMPTS", "3"))
+        llm_base_delay = float(os.getenv("ATHENACLAW_LLM_BASE_DELAY", "1.0"))
+        llm_timeout_env = os.getenv("ATHENACLAW_LLM_TIMEOUT_SEC")
+        llm_timeout_sec = float(llm_timeout_env) if llm_timeout_env else 60.0
         search_provider = os.getenv("ATHENACLAW_SEARCH_PROVIDER", "tavily")
         tavily_api_key = os.getenv("TAVILY_API_KEY") or None
         image_detail = (os.getenv("ATHENACLAW_IMAGE_DETAIL") or "low").strip().lower() or "low"
@@ -116,6 +123,9 @@ class AgentConfig:
             context_window=context_window,
             compact_recent_turns=compact_recent_turns,
             session_keep_last_user_messages=session_keep_last,
+            llm_max_attempts=llm_max_attempts,
+            llm_base_delay=llm_base_delay,
+            llm_timeout_sec=llm_timeout_sec,
             search_provider=search_provider,
             tavily_api_key=tavily_api_key,
             image_detail=image_detail,
@@ -299,6 +309,9 @@ def build_kernel_bundle(
         model=config.model,
         provider=provider,
         context_window=config.context_window, compact_recent_turns=config.compact_recent_turns,
+        llm_max_attempts=config.llm_max_attempts,
+        llm_base_delay=config.llm_base_delay,
+        llm_timeout_sec=config.llm_timeout_sec,
     )
     kernel.data.set(
         "_runtime_paths",

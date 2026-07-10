@@ -1,7 +1,7 @@
 """
-[INPUT]: dataclasses, json, time, uuid
+[INPUT]: dataclasses, json, time, uuid, athenaclaw.llm.retry 的 call_with_retry
 [OUTPUT]: SubAgentDef, SubAgentResult, filter_schemas, run_subagent
-[POS]: 领域无关的 Sub-Agent 纯函数层：数据类型 + 通用 ReAct loop + 资源管控。不依赖 agent 包，provider 由调用方注入
+[POS]: 领域无关的 Sub-Agent 纯函数层：数据类型 + 通用 ReAct loop + 资源管控。provider 由调用方注入，重试策略复用 llm/retry.py
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -12,6 +12,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 from uuid import uuid4
+
+from athenaclaw.llm.retry import call_with_retry
 
 
 
@@ -330,41 +332,23 @@ def _call_llm(
     round_num: int | None = None,
 ) -> Any | None:
     """带 3 次指数退避的 LLM 调用（temperature 不兼容时自动降级）"""
-    for attempt in range(3):
-        try:
-            return provider.complete(
-                model=model,
-                messages=messages,
-                tools=tools,
-                temperature=temperature,
-            )
-        except Exception as exc:
-            if "temperature" in str(exc).lower() and temperature is not None:
-                if emit_fn and agent_name and run_id and round_num is not None:
-                    emit_fn("subagent.llm.call.retry", {
-                        "name": agent_name,
-                        "run_id": run_id,
-                        "round": round_num,
-                        "attempt": attempt + 1,
-                        "reason": "temperature_incompatible",
-                        "error_type": type(exc).__name__,
-                        "error": str(exc),
-                    })
-                temperature = None
-                continue
-            if emit_fn and agent_name and run_id and round_num is not None:
-                emit_fn("subagent.llm.call.error", {
-                    "name": agent_name,
-                    "run_id": run_id,
-                    "round": round_num,
-                    "attempt": attempt + 1,
-                    "error_type": type(exc).__name__,
-                    "error": str(exc),
-                })
-            if attempt == 2:
-                return None
-            time.sleep(2 ** attempt)
-    return None
+    wrapped_emit = None
+    if emit_fn and agent_name and run_id and round_num is not None:
+        wrapped_emit = emit_fn
+
+    return call_with_retry(
+        provider=provider,
+        model=model,
+        messages=messages,
+        tools=tools,
+        temperature=temperature,
+        attempts=3,
+        base_delay=1.0,
+        emit_fn=wrapped_emit,
+        emit_prefix="subagent.llm",
+        emit_context={"name": agent_name, "run_id": run_id, "round": round_num},
+        reraise_on_exhaustion=False,
+    )
 
 
 @dataclass(frozen=True)

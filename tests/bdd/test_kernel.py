@@ -161,6 +161,119 @@ def test_kernel_emits_llm_call_error_on_provider_exception():
     assert "provider 400" in seen[0]["error"]
 
 
+def test_kernel_retries_llm_call_and_succeeds(monkeypatch):
+    monkeypatch.setattr("athenaclaw.llm.retry.time.sleep", lambda _s: None)
+    kernel = Kernel()
+    session = Session()
+    retry_events: list[dict] = []
+    kernel.wire("llm.call.error", lambda _e, data: retry_events.append(data))
+    kernel.provider = MagicMock()
+    ok = SimpleNamespace(
+        assistant_message={"role": "assistant", "content": "hi"},
+        finish_reason="stop",
+        tool_calls=[],
+        usage_total_tokens=5,
+    )
+    kernel.provider.complete.side_effect = [RuntimeError("transient"), RuntimeError("transient"), ok]
+
+    reply = kernel.turn("hello", session)
+
+    assert reply == "hi"
+    assert kernel.provider.complete.call_count == 3
+    assert len(retry_events) == 2
+
+
+def test_kernel_tool_args_invalid_json_not_silently_swallowed():
+    kernel = Kernel()
+
+    def echo_handler(args):
+        return {"echo": args}
+
+    kernel.tool(
+        name="echo",
+        description="回声测试",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=echo_handler,
+    )
+    session = Session()
+    invalid_events: list[dict] = []
+    kernel.wire("tool.args.invalid", lambda _e, data: invalid_events.append(data))
+
+    responses = [
+        _mock_response(
+            "tool_calls",
+            [SimpleNamespace(id="tc1", function=SimpleNamespace(name="echo", arguments="{not valid json"))],
+        ),
+        _mock_response("stop", content="done"),
+    ]
+    resp_iter = iter(responses)
+    mock_create = MagicMock(side_effect=lambda **_: next(resp_iter))
+
+    with patch.object(kernel.client.chat.completions, "create", mock_create):
+        reply = kernel.turn("测试", session)
+
+    assert reply == "done"
+    assert len(invalid_events) == 1
+    assert invalid_events[0]["name"] == "echo"
+    tool_msgs = [m for m in session.history if m.get("role") == "tool"]
+    assert tool_msgs
+    assert "不是合法 JSON" in json.loads(tool_msgs[0]["content"])["error"]
+
+
+def test_kernel_call_tool_emits_tool_error_event():
+    kernel = Kernel()
+
+    def failing_handler(_args):
+        raise ValueError("boom")
+
+    kernel.tool(
+        name="fail",
+        description="总是抛异常",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=failing_handler,
+    )
+    tool_def = kernel._tools["fail"]
+    events: list[dict] = []
+    kernel.wire("tool.error", lambda _e, data: events.append(data))
+
+    result = kernel._call_tool("fail", tool_def, {})
+
+    assert result == {"error": "ValueError: boom"}
+    assert len(events) == 1
+    assert events[0]["error_type"] == "ValueError"
+    assert "boom" in events[0]["error"]
+    assert "traceback" in events[0]
+
+
+def test_kernel_emits_turn_exhausted_with_readable_message():
+    kernel = Kernel()
+    kernel.max_rounds = 2
+    session = Session()
+    events: list[dict] = []
+    kernel.wire("turn.exhausted", lambda _e, data: events.append(data))
+
+    def echo_handler(args):
+        return {"echo": args}
+
+    kernel.tool(
+        name="echo",
+        description="回声测试",
+        parameters={"type": "object", "properties": {}, "required": []},
+        handler=echo_handler,
+    )
+    mock_create = MagicMock(side_effect=lambda **_: _mock_response(
+        "tool_calls", [_tool_call("echo", {"text": "loop"})],
+    ))
+
+    with patch.object(kernel.client.chat.completions, "create", mock_create):
+        reply = kernel.turn("测试", session)
+
+    assert "最大工具调用轮数" in reply
+    assert "[max_rounds=" not in reply
+    assert len(events) == 1
+    assert events[0]["max_rounds"] == 2
+
+
 def test_stream_complete_preserves_reasoning_content_on_tool_call():
     kernel = Kernel()
 

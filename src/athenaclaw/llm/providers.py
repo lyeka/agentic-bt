@@ -50,6 +50,7 @@ class LLMProvider(Protocol):
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         temperature: float | None = None,
+        timeout: float | None = None,
     ) -> LLMResult: ...
 
 
@@ -77,6 +78,7 @@ class OpenAIChatProvider:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         temperature: float | None = None,
+        timeout: float | None = None,
     ) -> LLMResult:
         kwargs: dict[str, Any] = {
             "model": model,
@@ -86,6 +88,8 @@ class OpenAIChatProvider:
             kwargs["tools"] = tools
         if temperature is not None:
             kwargs["temperature"] = temperature
+        if timeout is not None:
+            kwargs["timeout"] = timeout
 
         try:
             response = self.client.chat.completions.create(**kwargs)
