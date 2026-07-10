@@ -41,7 +41,6 @@ athenaclaw = "athenaclaw.interfaces.cli:main"
 athenaclaw-telegram = "athenaclaw.interfaces.telegram:main"
 athenaclaw-discord = "athenaclaw.interfaces.discord:main"
 athenaclaw-worker = "athenaclaw.automation.worker:main"
-athenaclaw-harness = "athenaclaw.harness:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/athenaclaw"]

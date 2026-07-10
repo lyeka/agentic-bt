@@ -5,7 +5,7 @@
 
 ## 成员清单
 
-service.py: 核心实现（~1150行）— Kernel（turn/_do_llm_call/_call_tool/tool policy/skill 合约验证/降级事件）、Session（含 summary 摘要）、DataStore、Permission、MemoryCompressor 接口、SEED/AUTOMATION/TRADE/WORKSPACE guide 常量、skill_invoke
+service.py: 核心实现（~1100行）— Kernel（turn/_do_llm_call/_call_tool/tool policy/skill 合约验证/降级事件）、Session（含 summary 摘要）、DataStore、Permission、MemoryCompressor 接口、SEED/AUTOMATION/TRADE/WORKSPACE guide 常量、skill_invoke
 models.py: 薄包装，re-export DataStore/ExecutionContext/MemoryCompressor/Permission/Session/ToolAccessPolicy 等
 prompts.py: 薄包装，re-export AUTOMATION_GUIDE/SEED_PROMPT/TRADE_GUIDE/WORKSPACE_GUIDE
 seed.py: SEED_PROMPT 定义——首次启动自举种子 system prompt

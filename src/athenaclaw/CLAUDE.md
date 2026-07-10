@@ -17,4 +17,3 @@ AthenaClaw 主产品包。
 - `interfaces/`：CLI、Telegram、Discord、TUI、IM
 - `integrations/`：market/web provider
 - `observability/`：trace
-- `harness.py`：服务管理（update/status/version/start），athenaclaw-harness CLI 入口
