@@ -5,7 +5,7 @@
 
 ## 成员清单
 
-service.py: 核心实现（~1200行）— Kernel（turn/_do_llm_call/_stream_complete/_call_tool/tool policy/skill 合约验证/降级事件）、Session（含 summary 摘要）、DataStore、Permission、MemoryCompressor 接口、SEED/AUTOMATION/TRADE/WORKSPACE guide 常量、skill_invoke
+service.py: 核心实现（~1150行）— Kernel（turn/_do_llm_call/_call_tool/tool policy/skill 合约验证/降级事件）、Session（含 summary 摘要）、DataStore、Permission、MemoryCompressor 接口、SEED/AUTOMATION/TRADE/WORKSPACE guide 常量、skill_invoke
 models.py: 薄包装，re-export DataStore/ExecutionContext/MemoryCompressor/Permission/Session/ToolAccessPolicy 等
 prompts.py: 薄包装，re-export AUTOMATION_GUIDE/SEED_PROMPT/TRADE_GUIDE/WORKSPACE_GUIDE
 seed.py: SEED_PROMPT 定义——首次启动自举种子 system prompt
@@ -13,6 +13,10 @@ seed.py: SEED_PROMPT 定义——首次启动自举种子 system prompt
 ## LLM 调用容错
 
 `_do_llm_call` 非 stream 分支委托 `athenaclaw.llm.retry.call_with_retry`（指数退避 + temperature 不兼容降级），exhausted 时 reraise。`llm_max_attempts`/`llm_base_delay`/`llm_timeout_sec` 由 `Kernel.__init__` 接收，来源 `runtime/bundle.py::AgentConfig`。
+
+## Stream（M2：下沉进 provider）
+
+stream 分支不再自行解析 chunk：判据 `self.stream and hasattr(self.provider, "stream")`，直接调用 `provider.stream(..., on_chunk=...)`，`on_chunk` 经 `emit("llm.chunk", ...)` 转发（事件契约不变，TUI 消费端零改动）。`_stream_complete` 已删除。`Kernel.client` 现为只读兼容属性（`getattr(self.provider, "client", None)`），仅供测试 mock `provider.complete()` 用，不再有 setter 后门。
 
 ## 新增事件（M1 可靠性加固）
 

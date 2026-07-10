@@ -15,7 +15,7 @@ import pytest
 from pytest_bdd import given, parsers, scenario, then, when
 
 from athenaclaw.kernel import Kernel, Session, WORKSPACE_GUIDE
-from athenaclaw.llm.providers import message_to_dict
+from athenaclaw.llm.providers import LLMResult, message_to_dict
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -274,62 +274,34 @@ def test_kernel_emits_turn_exhausted_with_readable_message():
     assert events[0]["max_rounds"] == 2
 
 
-def test_stream_complete_preserves_reasoning_content_on_tool_call():
+def test_kernel_stream_delegates_to_provider_stream_and_emits_llm_chunk():
+    """Kernel 不再自己解析 chunk：stream 模式下委托 provider.stream()，on_chunk 回调经 emit 转发为 llm.chunk。"""
     kernel = Kernel()
+    kernel.stream = True
 
-    class _FakeStreamClient:
-        def __init__(self) -> None:
-            self.chat = self
-            self.completions = self
+    class _StubStreamProvider:
+        def complete(self, **_kwargs):
+            raise AssertionError("stream 模式不应调用 complete()")
 
-        def create(self, **_kwargs):
-            return [
-                SimpleNamespace(
-                    choices=[
-                        SimpleNamespace(
-                            finish_reason=None,
-                            delta=SimpleNamespace(
-                                content=None,
-                                reasoning_content="先看持仓",
-                                tool_calls=None,
-                            ),
-                        )
-                    ]
-                ),
-                SimpleNamespace(
-                    choices=[
-                        SimpleNamespace(
-                            finish_reason="tool_calls",
-                            delta=SimpleNamespace(
-                                content=None,
-                                tool_calls=[
-                                    SimpleNamespace(
-                                        index=0,
-                                        id="tc1",
-                                        function=SimpleNamespace(
-                                            name="portfolio",
-                                            arguments='{"action":"get"}',
-                                        ),
-                                    )
-                                ],
-                            ),
-                        )
-                    ]
-                ),
-            ]
+        def stream(self, *, model, messages, tools, timeout, on_chunk):
+            on_chunk("先看")
+            on_chunk("持仓")
+            return LLMResult(
+                assistant_message={"role": "assistant", "content": "先看持仓"},
+                finish_reason="stop",
+                tool_calls=[],
+                usage_total_tokens=42,
+            )
 
-    kernel.client = _FakeStreamClient()
+    kernel.provider = _StubStreamProvider()
+    chunks: list[dict] = []
+    kernel.wire("llm.chunk", lambda _e, data: chunks.append(data))
 
-    result = kernel._stream_complete(
-        model=kernel.model,
-        messages=[{"role": "user", "content": "查看持仓"}],
-        tools=None,
-        round_num=1,
-    )
+    result = kernel._do_llm_call(round_num=1, model=kernel.model, messages=[], tools=None)
 
-    assert result.finish_reason == "tool_calls"
-    assert result.assistant_message["reasoning_content"] == "先看持仓"
-    assert result.assistant_message["tool_calls"][0]["function"]["name"] == "portfolio"
+    assert result.finish_reason == "stop"
+    assert result.usage_total_tokens == 42
+    assert [c["content"] for c in chunks] == ["先看", "持仓"]
 
 
 @given("一个注册了 echo 工具的 Kernel", target_fixture="kctx")

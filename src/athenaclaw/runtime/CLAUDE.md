@@ -5,7 +5,7 @@
 
 ## 成员清单
 
-bundle.py: AgentConfig（含 `llm_max_attempts`/`llm_base_delay`/`llm_timeout_sec`，`from_env()` 读取 `ATHENACLAW_LLM_MAX_ATTEMPTS`/`ATHENACLAW_LLM_BASE_DELAY`/`ATHENACLAW_LLM_TIMEOUT_SEC`）、KernelBundle、build_kernel_bundle —— 组装 Kernel 并注入重试/超时配置
+bundle.py: AgentConfig（含 `llm_max_attempts`/`llm_base_delay`/`llm_timeout_sec`/`provider`，`from_env()` 读取 `ATHENACLAW_LLM_MAX_ATTEMPTS`/`ATHENACLAW_LLM_BASE_DELAY`/`ATHENACLAW_LLM_TIMEOUT_SEC`/`ATHENACLAW_PROVIDER`）、KernelBundle、build_kernel_bundle、`_build_provider`（M2：按 `AgentConfig.provider` 选择 `AnthropicProvider` / 默认 `OpenAIChatProvider`）—— 组装 Kernel 并注入重试/超时/provider 配置
 config.py: 薄包装，re-export AgentConfig
 factories.py: 薄包装，re-export `_build_automation_delivery_channels`/`_build_market_adapter`/`_make_adapter`
 session_store.py: SessionStore、JsonSessionStore —— 会话持久化基础设施，原子写入 + 兼容旧格式

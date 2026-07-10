@@ -1,7 +1,7 @@
 """
 [INPUT]: json, pathlib, shutil, enum, agent.skills, agent.subagents, agent.messages, agent.providers (LLMProvider/LLMResult/LLMToolCall/OpenAIChatProvider)
-[OUTPUT]: Kernel — 核心协调器（_do_llm_call 统一入口 + _stream_complete 流式 + tool policy + per-turn execution context + skill 合约验证 + 降级事件）；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；EVOLUTION_GUIDE；skill_invoke
-[POS]: agent 包核心，系统唯一协调中心：ReAct loop + 声明式 wire/emit + DataStore + 权限 + 自举 + Skill Engine + SubAgent System + stream/非 stream 双轨 LLM 调用
+[OUTPUT]: Kernel — 核心协调器（_do_llm_call 统一入口，stream/非 stream 双轨均委托 provider.stream()/provider.complete() + tool policy + per-turn execution context + skill 合约验证 + 降级事件）；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；EVOLUTION_GUIDE；skill_invoke
+[POS]: agent 包核心，系统唯一协调中心：ReAct loop + 声明式 wire/emit + DataStore + 权限 + 自举 + Skill Engine + SubAgent System + stream/非 stream 双轨 LLM 调用（流式解析下沉进 provider）
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -373,7 +373,6 @@ class Kernel:
             base_url=base_url,
             api_key=api_key,
         )
-        self.client = getattr(self.provider, "client", None)
         self.stream = False
         self.data = DataStore()
         self._tools: dict[str, ToolDef] = {}
@@ -390,13 +389,8 @@ class Kernel:
 
     @property
     def client(self) -> Any | None:
-        return getattr(self, "_client", None)
-
-    @client.setter
-    def client(self, value: Any | None) -> None:
-        self._client = value
-        if hasattr(self, "provider") and hasattr(self.provider, "client"):
-            self.provider.client = value
+        """只读兼容属性：暴露 provider 底层 client（若有），供测试 mock provider.complete() 使用。"""
+        return getattr(self.provider, "client", None)
 
     # ── 自举 ──────────────────────────────────────────────────────────────────
 
@@ -869,11 +863,14 @@ class Kernel:
         """LLM 调用统一入口：stream / 非 stream 双轨，返回统一 LLMResult。"""
         self.emit("llm.call.start", {"round": round_num})
 
-        if self.stream and self.client is not None:
+        if self.stream and hasattr(self.provider, "stream"):
             try:
-                result = self._stream_complete(
-                    model=model, messages=messages,
-                    tools=tools, round_num=round_num,
+                result = self.provider.stream(
+                    model=model,
+                    messages=messages,
+                    tools=tools,
+                    timeout=self.llm_timeout_sec,
+                    on_chunk=lambda delta: self.emit("llm.chunk", {"content": delta, "round": round_num}),
                 )
             except Exception as exc:
                 self.emit("llm.call.error", {
@@ -903,81 +900,6 @@ class Kernel:
             "total_tokens": result.usage_total_tokens,
         })
         return result
-
-    def _stream_complete(
-        self,
-        *,
-        model: str,
-        messages: list[dict],
-        tools: list[dict] | None,
-        round_num: int,
-    ) -> LLMResult:
-        """OpenAI streaming：逐 chunk 推送 llm.chunk 事件，返回统一 LLMResult。"""
-        compiled = (
-            self.provider.compile_messages(messages)
-            if hasattr(self.provider, "compile_messages")
-            else messages
-        )
-        kwargs: dict[str, Any] = {"model": model, "messages": compiled, "stream": True}
-        if tools:
-            kwargs["tools"] = tools
-
-        chunks = self.client.chat.completions.create(**kwargs)
-        parts: list[str] = []
-        reasoning_parts: list[str] = []
-        tc_acc: dict[int, dict] = {}
-        finish_reason = "stop"
-
-        for chunk in chunks:
-            if not chunk.choices:
-                continue
-            delta = chunk.choices[0].delta
-            if chunk.choices[0].finish_reason:
-                finish_reason = chunk.choices[0].finish_reason
-            if getattr(delta, "content", None):
-                parts.append(delta.content)
-                self.emit("llm.chunk", {"content": delta.content, "round": round_num})
-            reasoning_piece = getattr(delta, "reasoning_content", None)
-            if reasoning_piece is None:
-                model_extra = getattr(delta, "model_extra", None)
-                if isinstance(model_extra, dict):
-                    reasoning_piece = model_extra.get("reasoning_content")
-            if reasoning_piece:
-                reasoning_parts.append(str(reasoning_piece))
-            if getattr(delta, "tool_calls", None):
-                for tc in delta.tool_calls:
-                    idx = tc.index
-                    if idx not in tc_acc:
-                        tc_acc[idx] = {"id": "", "name": "", "arguments": ""}
-                    if tc.id:
-                        tc_acc[idx]["id"] = tc.id
-                    if tc.function:
-                        if tc.function.name:
-                            tc_acc[idx]["name"] = tc.function.name
-                        if tc.function.arguments:
-                            tc_acc[idx]["arguments"] += tc.function.arguments
-
-        msg: dict[str, Any] = {"role": "assistant", "content": "".join(parts) or None}
-        tool_calls: list[LLMToolCall] = []
-        for v in tc_acc.values():
-            msg.setdefault("tool_calls", []).append({
-                "id": v["id"], "type": "function",
-                "function": {"name": v["name"], "arguments": v["arguments"]},
-            })
-            tool_calls.append(LLMToolCall(id=v["id"], name=v["name"], arguments=v["arguments"]))
-        if reasoning_parts:
-            msg["reasoning_content"] = "".join(reasoning_parts)
-        elif tool_calls:
-            # Keep streamed tool-call messages compatible with providers that
-            # require reasoning_content when thinking is enabled.
-            msg["reasoning_content"] = ""
-
-        return LLMResult(
-            assistant_message=msg,
-            finish_reason=finish_reason,
-            tool_calls=tool_calls,
-            usage_total_tokens=0,
-        )
 
     def _call_tool(self, name: str, tool_def: ToolDef, args: dict) -> Any:
         if self._tool_policy is not None:

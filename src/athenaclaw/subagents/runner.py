@@ -1,7 +1,7 @@
 """
-[INPUT]: dataclasses, json, time, uuid, athenaclaw.llm.retry 的 call_with_retry
+[INPUT]: dataclasses, json, time, uuid, athenaclaw.llm.retry 的 call_with_retry，athenaclaw.llm.providers 的 LLMResult/OpenAIChatProvider/message_to_dict
 [OUTPUT]: SubAgentDef, SubAgentResult, filter_schemas, run_subagent
-[POS]: 领域无关的 Sub-Agent 纯函数层：数据类型 + 通用 ReAct loop + 资源管控。provider 由调用方注入，重试策略复用 llm/retry.py
+[POS]: 领域无关的 Sub-Agent 纯函数层：数据类型 + 通用 ReAct loop + 资源管控。provider 由调用方注入，重试策略复用 llm/retry.py；`_CompatClientProvider` 委托 OpenAIChatProvider，消除 response-parsing 第二套复刻
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 from uuid import uuid4
 
+from athenaclaw.llm.providers import LLMResult, OpenAIChatProvider, message_to_dict
 from athenaclaw.llm.retry import call_with_retry
 
 
@@ -351,26 +352,15 @@ def _call_llm(
     )
 
 
-@dataclass(frozen=True)
-class _CompatToolCall:
-    id: str
-    name: str
-    arguments: str
-
-
-@dataclass(frozen=True)
-class _CompatLLMResult:
-    assistant_message: dict[str, Any]
-    finish_reason: str
-    tool_calls: list[_CompatToolCall] = field(default_factory=list)
-    usage_total_tokens: int = 0
-
-
 class _CompatClientProvider:
-    """兼容旧 tests / 调用方：把 OpenAI-style client 适配成 provider.complete()."""
+    """兼容旧 tests / 调用方：把 OpenAI-style client 适配成 provider.complete()。
+
+    不再自行解析 response——委托给 OpenAIChatProvider，消除与其重复的
+    response-parsing 逻辑（此前是 message_to_dict 的第二套复刻）。
+    """
 
     def __init__(self, client: Any) -> None:
-        self._client = client
+        self._provider = OpenAIChatProvider(client=client)
 
     def complete(
         self,
@@ -379,55 +369,10 @@ class _CompatClientProvider:
         messages: list[dict[str, Any]],
         tools: list[dict[str, Any]] | None = None,
         temperature: float | None = None,
-    ) -> _CompatLLMResult:
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "messages": messages,
-        }
-        if tools:
-            kwargs["tools"] = tools
-        if temperature is not None:
-            kwargs["temperature"] = temperature
-
-        response = self._client.chat.completions.create(**kwargs)
-        choice = response.choices[0]
-        message = getattr(choice, "message", None)
-        tool_calls = [
-            _CompatToolCall(
-                id=str(tc.id),
-                name=str(tc.function.name),
-                arguments=str(tc.function.arguments),
-            )
-            for tc in (getattr(message, "tool_calls", None) or [])
-        ]
-        usage_total_tokens = getattr(getattr(response, "usage", None), "total_tokens", 0) or 0
-        return _CompatLLMResult(
-            assistant_message=_msg_to_dict(message),
-            finish_reason=str(getattr(choice, "finish_reason", "") or ""),
-            tool_calls=tool_calls,
-            usage_total_tokens=int(usage_total_tokens),
-        )
+    ) -> LLMResult:
+        return self._provider.complete(model=model, messages=messages, tools=tools, temperature=temperature)
 
 
 def _msg_to_dict(msg: Any) -> dict:
-    """兼容测试：OpenAI message 对象 → dict。"""
-    d: dict[str, Any] = {"role": msg.role, "content": msg.content}
-    reasoning_content = getattr(msg, "reasoning_content", None)
-    model_extra = getattr(msg, "model_extra", None)
-    if reasoning_content is None and isinstance(model_extra, dict):
-        reasoning_content = model_extra.get("reasoning_content")
-    if reasoning_content is not None:
-        d["reasoning_content"] = reasoning_content
-    if msg.tool_calls:
-        d["tool_calls"] = [
-            {
-                "id": tc.id,
-                "type": "function",
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                },
-            }
-            for tc in msg.tool_calls
-        ]
-    return d
+    """兼容测试：OpenAI message 对象 → dict。委托 llm.providers.message_to_dict，消除重复实现。"""
+    return message_to_dict(msg)

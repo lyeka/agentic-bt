@@ -1,7 +1,7 @@
 """
 [INPUT]: os, pathlib, agent.kernel, agent.tools, agent.session_store, agent.providers, agent.automation, core.subagent（market adapters 仅 lazy import）
-[OUTPUT]: AgentConfig, KernelBundle, build_kernel_bundle
-[POS]: 入口无关的 Kernel 组装层：统一 tools/permission/wire/trace/session_store/subagent 路径约定
+[OUTPUT]: AgentConfig（含 provider 字段）, KernelBundle, build_kernel_bundle, _build_provider（按 ATHENACLAW_PROVIDER 选择 OpenAIChatProvider / AnthropicProvider）
+[POS]: 入口无关的 Kernel 组装层：统一 tools/permission/wire/trace/session_store/subagent 路径约定 + provider 工厂
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -17,7 +17,7 @@ from typing import Callable
 from athenaclaw.kernel import Kernel, MEMORY_MAX_CHARS, Permission
 from athenaclaw.automation.store import AutomationStore
 from athenaclaw.automation import tools as automation_tools
-from athenaclaw.llm.providers import LLMProvider, OpenAIChatProvider
+from athenaclaw.llm.providers import AnthropicProvider, LLMProvider, OpenAIChatProvider
 from athenaclaw.runtime.session_store import JsonSessionStore, SessionStore
 from athenaclaw.tools import bash, compute, edit, market, portfolio, read, trade, watchlist, web, write
 from athenaclaw.trading import TradeAuditLog, TradeOrchestrator, TradePlanStore
@@ -68,6 +68,7 @@ class AgentConfig:
     llm_max_attempts: int = 3
     llm_base_delay: float = 1.0
     llm_timeout_sec: float | None = 60.0
+    provider: str = "openai"
     search_provider: str = "tavily"
     tavily_api_key: str | None = None
     image_detail: str = "low"
@@ -99,6 +100,7 @@ class AgentConfig:
         llm_base_delay = float(os.getenv("ATHENACLAW_LLM_BASE_DELAY", "1.0"))
         llm_timeout_env = os.getenv("ATHENACLAW_LLM_TIMEOUT_SEC")
         llm_timeout_sec = float(llm_timeout_env) if llm_timeout_env else 60.0
+        provider = (os.getenv("ATHENACLAW_PROVIDER") or "openai").strip().lower() or "openai"
         search_provider = os.getenv("ATHENACLAW_SEARCH_PROVIDER", "tavily")
         tavily_api_key = os.getenv("TAVILY_API_KEY") or None
         image_detail = (os.getenv("ATHENACLAW_IMAGE_DETAIL") or "low").strip().lower() or "low"
@@ -126,6 +128,7 @@ class AgentConfig:
             llm_max_attempts=llm_max_attempts,
             llm_base_delay=llm_base_delay,
             llm_timeout_sec=llm_timeout_sec,
+            provider=provider,
             search_provider=search_provider,
             tavily_api_key=tavily_api_key,
             image_detail=image_detail,
@@ -281,6 +284,16 @@ def _build_automation_delivery_channels() -> dict[str, object]:
     return channels
 
 
+def _build_provider(config: AgentConfig) -> LLMProvider:
+    if config.provider == "anthropic":
+        return AnthropicProvider(api_key=config.api_key)
+    return OpenAIChatProvider(
+        base_url=config.base_url,
+        api_key=config.api_key,
+        image_detail=config.image_detail,
+    )
+
+
 def build_kernel_bundle(
     *,
     config: AgentConfig,
@@ -299,11 +312,7 @@ def build_kernel_bundle(
     workspace.mkdir(parents=True, exist_ok=True)
     state.mkdir(parents=True, exist_ok=True)
 
-    provider = OpenAIChatProvider(
-        base_url=config.base_url,
-        api_key=config.api_key,
-        image_detail=config.image_detail,
-    )
+    provider = _build_provider(config)
     repo_root = _detect_repo_root(cwd)
     kernel = Kernel(
         model=config.model,

@@ -32,6 +32,9 @@ discord = [
 finnhub = [
     "finnhub-python>=2.4.20",
 ]
+anthropic = [
+    "anthropic>=0.40",
+]
 
 [project.scripts]
 athenaclaw = "athenaclaw.interfaces.cli:main"
