@@ -1,6 +1,6 @@
 """
 [INPUT]: json, pathlib, shutil, enum, agent.skills, agent.subagents, agent.messages, agent.providers (LLMProvider/LLMResult/LLMToolCall/OpenAIChatProvider)
-[OUTPUT]: Kernel — 核心协调器（_do_llm_call 统一入口，stream/非 stream 双轨均委托 provider.stream()/provider.complete() + tool policy + per-turn execution context + skill 合约验证 + 降级事件）；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；EVOLUTION_GUIDE；skill_invoke
+[OUTPUT]: Kernel — 核心协调器（_do_llm_call 统一入口，stream/非 stream 双轨均委托 provider.stream()/provider.complete() + tool policy + per-turn execution context + skill 合约验证 + 降级事件）；Session — 会话容器（含 summary 摘要）；DataStore — 数据注册表；Permission — 文件权限级别；MemoryCompressor — 压缩策略接口；MEMORY_MAX_CHARS；WORKSPACE_GUIDE；skill_invoke
 [POS]: agent 包核心，系统唯一协调中心：ReAct loop + 声明式 wire/emit + DataStore + 权限 + 自举 + Skill Engine + SubAgent System + stream/非 stream 双轨 LLM 调用（流式解析下沉进 provider）
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
@@ -180,40 +180,6 @@ TRADE_GUIDE = """\
 9. 没有同 broker 的新鲜行情或明确 market-state 证据时，不得推断“更容易成交”“当前处于常规交易时段”。类似 session=RTH 只能理解为订单会话语义，不能理解为当前市场状态。
 10. trade_account.get_positions 成功后，会把当前活动账户快照写入 Kernel.data['account']，供后续 compute 使用；这个 account 只代表当前活动账户，不是多账户容器。
 </trade_tools>"""
-
-EVOLUTION_GUIDE = """\
-<evolution>
-当涉及理解、诊断或修改自身代码时，严格遵循以下规则：
-
-1. 修改自身代码时，必须委派给 ask_coder。不要自己搜索、阅读或编辑源码。
-   coder 是你的代码专家子代理，它懂得怎么找文件、理解架构、写合规代码。
-   你的角色是向 coder 描述任务，然后把结果转达给用户。
-2. 调用 ask_coder 修改自身代码前，先调用 skill_invoke(name="self-evolve")
-   获取 AthenaClaw 的架构规则，将返回内容作为 ask_coder 的 context 参数传入。
-   示例: ask_coder(task="将压缩阈值改为90%", context=<self-evolve 返回内容>)
-3. 理解代码或诊断问题也用 ask_coder，但不需要加载 self-evolve。
-   示例: ask_coder(task="turn 方法的调用链是什么")
-   示例: ask_coder(task="market_ohlcv 工具报错，帮我查原因")
-4. 当任务是修改其他仓库时，先确认目标仓库位置，再调用 ask_coder。
-   - 用户给了明确本地路径：把绝对路径直接写进 ask_coder 的 task/context，只在该路径下工作
-   - 用户给了明确 git URL 且本地还没有仓库：告诉 coder clone 到 <runtime_paths> 里的 workspace_dir/repos/<repo_name>，再在该目录工作
-   - 用户既没给本地路径，也没给明确 git URL：先向用户提一个简短澄清问题
-   - 不要猜仓库位置，不要让 coder 从 home 根目录全盘搜索
-5. 所有代码修改必须在独立分支上进行，通过 PR 提交。不要直接编辑 working tree。
-   coder 会处理 branch → commit → push → gh pr create 的完整流程。
-6. 检查是否有可用更新:
-   bash: athenaclaw-harness status
-7. 从远端拉取已 merge 的代码并重装:
-   bash: athenaclaw-harness update
-   bash: athenaclaw-harness update v1.2.0
-8. harness update ≠ 应用本地编辑。
-   - harness update: 从 git 远端拉取已 merge 的代码 → pip install → health check
-   - 本地编辑: editable install 模式下，修改 src/ 文件立即生效（下次 import）
-   - 不要在本地 edit 后调 harness update，那是拉远端代码，会覆盖本地修改
-9. 更新完成后如需重启:
-   - harness 监督模式: 进程会自动循环重启
-   - 其他模式: 通知用户手动重启
-</evolution>"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -426,7 +392,6 @@ class Kernel:
         runtime_paths_xml = self._runtime_paths_prompt()
         if runtime_paths_xml:
             parts.append(runtime_paths_xml)
-        parts.append(EVOLUTION_GUIDE)
         ready_skills = {
             name: skill
             for name, skill in self._skills.items()
@@ -476,36 +441,6 @@ class Kernel:
                 lines.append(f"{key}: {value}")
         lines.append("</runtime_paths>")
         return "\n".join(lines)
-
-    def _expand_runtime_placeholders(self, text: str) -> str:
-        result = str(text or "")
-        paths = self._runtime_paths()
-        replacements = {
-            "$ATHENACLAW_SOURCE_DIR": paths.get("repo_root", ""),
-            "$ATHENACLAW_WORKSPACE": paths.get("workspace_dir", ""),
-            "$ATHENACLAW_STATE_DIR": paths.get("state_dir", ""),
-        }
-        for placeholder, value in replacements.items():
-            if value:
-                result = result.replace(placeholder, value)
-        return result
-
-    def _decorate_skill_invoke_result(self, name: str, result: dict[str, Any]) -> dict[str, Any]:
-        if name != "self-evolve":
-            return result
-        note = self._runtime_paths_prompt()
-        body = self._expand_runtime_placeholders(str(result.get("body", "")))
-        expanded = self._expand_runtime_placeholders(str(result.get("expanded", "")))
-        if note:
-            reminder = (
-                "Use these absolute paths instead of raw $ATHENACLAW_* placeholders "
-                "when reading, editing, or cloning repositories."
-            )
-            body = f"{body}\n\n{note}\n{reminder}"
-            expanded = f"{expanded}\n\n{note}\n{reminder}"
-        result["body"] = body
-        result["expanded"] = expanded
-        return result
 
     def _load_skills(self, cwd: Path, skill_roots: list[Path] | None = None) -> None:
         roots: list[tuple[Path, str]]
@@ -649,8 +584,6 @@ class Kernel:
                 return result
             skill_args = str(args.get("args", "")).strip()
             result = invoke_skill(name=name, args=skill_args, skills=self._skills)
-            if "error" not in result:
-                result = self._decorate_skill_invoke_result(name, result)
             self.emit(
                 "skill.invoke",
                 {"name": name, "args": skill_args, "error": result.get("error")},
