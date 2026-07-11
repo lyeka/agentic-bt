@@ -1,21 +1,22 @@
 """
 [INPUT]: uuid, datetime, athenaclaw.trading.*
 [OUTPUT]: TradeOrchestrator
-[POS]: 交易边界层的核心编排对象；负责 plan/apply/状态回读
+[POS]: 交易边界层的核心编排对象；负责账户/订单读取与单步下单/撤单执行
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
 from __future__ import annotations
 
 from decimal import Decimal, InvalidOperation
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from time import sleep
 from uuid import uuid4
 
 from athenaclaw.tools.market.schema import normalize_symbol
 from athenaclaw.trading.errors import TradeError, TradeErrorCode
+from athenaclaw.trading.policy import RiskAction, RiskContext, RiskGuard
 from athenaclaw.trading.protocol import TradeBrokerAdapter
-from athenaclaw.trading.store import TradeAuditLog, TradePlanStore
+from athenaclaw.trading.store import TradeAuditLog
 from athenaclaw.trading.types import (
     SubmitLimitOrderIntent,
     TradeAccountSnapshot,
@@ -23,9 +24,9 @@ from athenaclaw.trading.types import (
     TradeApplyResult,
     TradeOpenOrder,
     TradeOrderSnapshot,
-    TradePlan,
-    TradePreview,
     TradeReceipt,
+    decode_account_ref,
+    decode_order_ref,
 )
 
 
@@ -37,15 +38,13 @@ class TradeOrchestrator:
         self,
         *,
         adapter: TradeBrokerAdapter,
-        plan_store: TradePlanStore,
+        guard: RiskGuard,
         audit_log: TradeAuditLog,
-        plan_ttl_sec: int = 120,
         cancel_confirm_delays: tuple[float, ...] = (0.2, 0.5, 1.0),
     ) -> None:
         self._adapter = adapter
-        self._plan_store = plan_store
+        self._guard = guard
         self._audit_log = audit_log
-        self._plan_ttl_sec = plan_ttl_sec
         self._cancel_confirm_delays = cancel_confirm_delays
 
     def list_accounts(self):
@@ -81,7 +80,7 @@ class TradeOrchestrator:
         self._require_order_ref(order_ref)
         return self._adapter.get_order_status(order_ref)
 
-    def plan_submit_limit(
+    def execute_limit(
         self,
         *,
         account_ref: str,
@@ -89,7 +88,13 @@ class TradeOrchestrator:
         side: str,
         quantity: float,
         limit_price: float,
-    ) -> TradePlan:
+        automation: bool = False,
+    ) -> TradeApplyResult:
+        """校验 + 预检规整 + 风控裁决 + 下单，一步到底。
+
+        自主操作员不再有「plan 给人看，apply 再执行」的中间站——这里就是
+        唯一的执行入口，guard.evaluate 是唯一的安全边界。
+        """
         self._require_account_ref(account_ref)
         requested_limit_price = self._validate_price(limit_price)
         intent = SubmitLimitOrderIntent(
@@ -120,30 +125,33 @@ class TradeOrchestrator:
                 0,
                 f"limit_price normalized from {_format_price(intent.limit_price)} to {_format_price(normalized_intent.limit_price)}{suffix}",
             )
-        created_at = _utc_now_iso()
-        expires_at = _utc_expiry(self._plan_ttl_sec)
-        plan = TradePlan(
-            plan_id=f"plan-{uuid4().hex}",
-            operation="submit_limit",
-            plan_summary=_submit_plan_summary(normalized_intent),
-            confirm_text=_submit_confirm_text(normalized_intent),
-            warnings=tuple(warnings),
-            created_at=created_at,
-            expires_at=expires_at,
-            normalized_intent=normalized_intent.to_dict(),
-        )
-        self._plan_store.save(
-            plan,
-            payload={
-                "intent": normalized_intent.to_dict(),
-                "requested_limit_price": intent.limit_price,
-                "preview": _preview_payload(preview),
-            },
-        )
-        self._audit_log.append({"event": "trade.plan.created", "plan": plan.to_dict()})
-        return plan
 
-    def plan_cancel(self, *, order_ref: str) -> TradePlan:
+        env = self._account_parts(account_ref)["env"]
+        ctx = RiskContext(operation="submit_limit", env=env, automation=automation, intent=normalized_intent.to_dict())
+        decision = self._guard.evaluate(ctx)
+        self._audit_log.append({"event": "trade.guard.decision", "context": ctx.to_dict(), "decision": decision.to_dict()})
+        if decision.action is not RiskAction.ALLOW:
+            raise TradeError(TradeErrorCode.PERMISSION_DENIED, decision.reason or "交易未授权")
+
+        receipt = self._adapter.submit_limit_order(normalized_intent)
+        order_status = self._adapter.get_order_status(receipt.order_ref)
+        account_snapshot = None
+        if order_status.status in {"partially_filled", "filled"}:
+            account_snapshot = self.get_positions(normalized_intent.account_ref)
+        result = TradeApplyResult(
+            plan_id=f"exec-{uuid4().hex}",
+            operation="submit_limit",
+            result_summary=_submit_result_summary(normalized_intent, order_status),
+            receipt=receipt,
+            order_status=order_status,
+            account_snapshot=account_snapshot,
+            finalized=order_status.status in _TERMINAL_STATUSES,
+            warnings=tuple(warnings),
+        )
+        self._audit_log.append({"event": "trade.executed", "result": result.to_dict(), "guard": decision.to_dict()})
+        return result
+
+    def execute_cancel(self, *, order_ref: str, automation: bool = False) -> TradeApplyResult:
         self._require_order_ref(order_ref)
         order = self.get_order_status(order_ref)
         if order.status in _TERMINAL_STATUSES:
@@ -152,81 +160,30 @@ class TradeOrchestrator:
                 f"订单当前状态不可撤销: {order.status}",
                 details={"order_ref": order_ref, "status": order.status},
             )
-        created_at = _utc_now_iso()
-        plan = TradePlan(
-            plan_id=f"plan-{uuid4().hex}",
+
+        env = decode_order_ref(order_ref)["env"]
+        ctx = RiskContext(operation="cancel", env=env, automation=automation, intent={"order_ref": order_ref})
+        decision = self._guard.evaluate(ctx)
+        self._audit_log.append({"event": "trade.guard.decision", "context": ctx.to_dict(), "decision": decision.to_dict()})
+        if decision.action is not RiskAction.ALLOW:
+            raise TradeError(TradeErrorCode.PERMISSION_DENIED, decision.reason or "交易未授权")
+
+        receipt = self._adapter.cancel_order(order_ref)
+        order_status = self._confirm_order_status(order_ref)
+        finalized = order_status.status in _TERMINAL_STATUSES
+        warnings = ("cancel_requested_not_finalized",) if not finalized else ()
+        result = TradeApplyResult(
+            plan_id=f"exec-{uuid4().hex}",
             operation="cancel",
-            plan_summary=_cancel_plan_summary(order),
-            confirm_text=_cancel_confirm_text(order),
-            warnings=(),
-            created_at=created_at,
-            expires_at=_utc_expiry(self._plan_ttl_sec),
+            result_summary=_cancel_result_summary(order_status, finalized=finalized),
+            receipt=receipt,
+            order_status=order_status,
+            account_snapshot=None,
+            finalized=finalized,
+            warnings=warnings,
         )
-        self._plan_store.save(plan, payload={"order_ref": order_ref})
-        self._audit_log.append({"event": "trade.plan.created", "plan": plan.to_dict()})
-        return plan
-
-    def apply(self, plan_id: str) -> TradeApplyResult:
-        record = self._plan_store.load(plan_id)
-        if record is None:
-            raise TradeError(TradeErrorCode.PLAN_NOT_FOUND, f"未找到 plan: {plan_id}")
-        status = str(record.get("status") or "")
-        if status == "applied":
-            raise TradeError(TradeErrorCode.PLAN_ALREADY_APPLIED, "该 plan 已执行")
-        plan = record["plan"]
-        if _is_expired(str(plan["expires_at"])):
-            self._plan_store.mark_expired(plan_id)
-            raise TradeError(TradeErrorCode.PLAN_EXPIRED, "该 plan 已过期，请重新 plan")
-
-        operation = str(plan["operation"])
-        if operation == "submit_limit":
-            payload = record["payload"]["intent"]
-            intent = SubmitLimitOrderIntent(
-                account_ref=str(payload["account_ref"]),
-                symbol=str(payload["symbol"]),
-                side=str(payload["side"]),
-                quantity=float(payload["quantity"]),
-                limit_price=float(payload["limit_price"]),
-            )
-            receipt = self._adapter.submit_limit_order(intent)
-            order_status = self._adapter.get_order_status(receipt.order_ref)
-            account_snapshot = None
-            if order_status.status in {"partially_filled", "filled"}:
-                account_snapshot = self.get_positions(intent.account_ref)
-            result = TradeApplyResult(
-                plan_id=plan_id,
-                operation=operation,
-                result_summary=_submit_result_summary(intent, order_status),
-                receipt=receipt,
-                order_status=order_status,
-                account_snapshot=account_snapshot,
-                finalized=order_status.status in _TERMINAL_STATUSES,
-            )
-        elif operation == "cancel":
-            order_ref = str(record["payload"]["order_ref"])
-            receipt = self._adapter.cancel_order(order_ref)
-            order_status = self._confirm_order_status(order_ref)
-            finalized = order_status.status in _TERMINAL_STATUSES
-            warnings = ("cancel_requested_not_finalized",) if not finalized else ()
-            result = TradeApplyResult(
-                plan_id=plan_id,
-                operation=operation,
-                result_summary=_cancel_result_summary(order_status, finalized=finalized),
-                receipt=receipt,
-                order_status=order_status,
-                account_snapshot=None,
-                finalized=finalized,
-                warnings=warnings,
-            )
-        else:
-            raise TradeError(TradeErrorCode.UNSUPPORTED_OPERATION, f"不支持的 plan 操作: {operation}")
-
-        self._plan_store.mark_applied(plan_id, result=result.to_dict(), applied_at=_utc_now_iso())
-        self._audit_log.append({"event": "trade.plan.applied", "plan_id": plan_id, "result": result.to_dict()})
+        self._audit_log.append({"event": "trade.executed", "result": result.to_dict(), "guard": decision.to_dict()})
         return result
-
-    def get_plan(self, plan_id: str) -> dict[str, object] | None:
-        return self._plan_store.load(plan_id)
 
     def _adapter_capabilities(self):
         return self._adapter.capabilities()
@@ -269,8 +226,6 @@ class TradeOrchestrator:
 
     @staticmethod
     def _require_account_ref(account_ref: str) -> None:
-        from athenaclaw.trading.types import decode_account_ref
-
         try:
             decode_account_ref(account_ref)
         except Exception as exc:  # pragma: no cover - thin validation wrapper
@@ -278,8 +233,6 @@ class TradeOrchestrator:
 
     @staticmethod
     def _require_order_ref(order_ref: str) -> None:
-        from athenaclaw.trading.types import decode_order_ref
-
         try:
             decode_order_ref(order_ref)
         except Exception as exc:  # pragma: no cover - thin validation wrapper
@@ -287,8 +240,6 @@ class TradeOrchestrator:
 
     @staticmethod
     def _account_parts(account_ref: str) -> dict[str, str]:
-        from athenaclaw.trading.types import decode_account_ref
-
         try:
             return decode_account_ref(account_ref)
         except Exception as exc:  # pragma: no cover - validated by _require_account_ref
@@ -297,42 +248,6 @@ class TradeOrchestrator:
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _utc_expiry(ttl_sec: int) -> str:
-    return (datetime.now(timezone.utc) + timedelta(seconds=ttl_sec)).isoformat()
-
-
-def _is_expired(ts: str) -> bool:
-    return datetime.fromisoformat(ts) < datetime.now(timezone.utc)
-
-
-def _preview_payload(preview: TradePreview | None) -> dict | None:
-    if preview is None:
-        return None
-    return preview.to_dict()
-
-
-def _submit_plan_summary(intent: SubmitLimitOrderIntent) -> str:
-    return (
-        f"计划提交 {intent.side.upper()} {intent.quantity:g} {intent.symbol} "
-        f"限价 {_format_price(intent.limit_price)}"
-    )
-
-
-def _submit_confirm_text(intent: SubmitLimitOrderIntent) -> str:
-    return (
-        f"确认提交 {intent.side.upper()} {intent.quantity:g} {intent.symbol} "
-        f"限价 {_format_price(intent.limit_price)} 吗？"
-    )
-
-
-def _cancel_plan_summary(order: TradeOrderSnapshot) -> str:
-    return f"计划撤销 {order.symbol} {order.side.upper()} {order.quantity:g} 的未完成订单"
-
-
-def _cancel_confirm_text(order: TradeOrderSnapshot) -> str:
-    return f"确认撤销 {order.symbol} {order.side.upper()} {order.quantity:g} 的订单吗？"
 
 
 def _submit_result_summary(intent: SubmitLimitOrderIntent, order: TradeOrderSnapshot) -> str:

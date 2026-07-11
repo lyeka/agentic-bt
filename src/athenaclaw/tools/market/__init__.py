@@ -1,3 +1,4 @@
+from athenaclaw.tools.market.snapshot import register as register_snapshot
 from athenaclaw.tools.market.tool import register
 
-__all__ = ["register"]
+__all__ = ["register", "register_snapshot"]

@@ -35,6 +35,9 @@ finnhub = [
 anthropic = [
     "anthropic>=0.40",
 ]
+futu = [
+    "futu-api>=9.0",
+]
 
 [project.scripts]
 athenaclaw = "athenaclaw.interfaces.cli:main"

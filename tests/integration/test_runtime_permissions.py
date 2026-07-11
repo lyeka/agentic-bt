@@ -157,6 +157,6 @@ def test_build_kernel_bundle_registers_trade_tools_and_trade_guide(tmp_path, mon
     )
 
     assert "trade_account" in bundle.kernel._tools
-    assert "trade_plan" in bundle.kernel._tools
-    assert "trade_apply" in bundle.kernel._tools
+    assert "trade_execute" in bundle.kernel._tools
+    assert "market_snapshot" in bundle.kernel._tools
     assert "<trade_tools>" in (bundle.kernel._system_prompt or "")

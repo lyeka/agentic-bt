@@ -228,8 +228,9 @@ Reaction 不是 workflow，而是“一次执行”。
 交易工具的自动化规则：
 
 - `trade_account` 允许只读使用
-- `trade_plan` 永久禁止
-- `trade_apply` 永久禁止
+- `trade_execute` 允许调用——Agent 已是自主交易操作员，automation 可自主下单/撤单
+
+⚠️ 风控专题首要 TODO：无人值守 automation 对 real 账户裸奔风险最高。`TradeOrchestrator` 传给 `RiskGuard` 的 `RiskContext.automation` 字段就是为它预留的裁决挂钩，但这期 `AllowAllGuard` 恒 ALLOW，当前没有任何拦截。详见 [trading.md](./trading.md) §6。
 
 ## 11. 幂等与恢复
 

@@ -120,6 +120,13 @@ class _PreviewContext:
         )
 
 
+class _UnlockRejectedContext:
+    """place_order 返回未解锁错误 —— 模拟 REAL 账户在 OpenD 侧尚未手工解锁的场景。"""
+
+    def place_order(self, **_kwargs):
+        return (1, "unlock_trade required before placing order")
+
+
 def _make_adapter(context) -> FutuTradeAdapter:
     adapter = FutuTradeAdapter(config=FutuTradeConfig())
     adapter._manager = _FakeManager(context)
@@ -189,3 +196,23 @@ def test_futu_preview_returns_soft_warning_and_limits(monkeypatch):
     assert preview.normalized_limit_price == 174.03
     assert preview.normalization_reason == "fallback_us_default"
     assert context.preview_calls == 1
+
+
+def test_futu_submit_limit_order_trade_locked_reports_manual_unlock_hint(monkeypatch):
+    """零密码设计的落地验证：REAL 未解锁时报错必须指向 OpenD 手工解锁，不能暗示代码能自动解锁。"""
+    monkeypatch.setattr("athenaclaw.integrations.futu.trade_adapter._load_futu", lambda: _FakeFutu)
+    adapter = _make_adapter(_UnlockRejectedContext())
+    intent = SubmitLimitOrderIntent(
+        account_ref=encode_account_ref(broker="futu", env="real", account_id="1001"),
+        symbol="AAPL",
+        side="buy",
+        quantity=1,
+        limit_price=180.0,
+    )
+
+    with pytest.raises(TradeError) as exc:
+        adapter.submit_limit_order(intent)
+
+    assert exc.value.code == TradeErrorCode.TRADE_LOCKED
+    assert "OpenD 客户端手工解锁" in exc.value.message
+    assert "不持有交易密码" in exc.value.message
