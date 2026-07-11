@@ -7,16 +7,18 @@ import pytest
 from athenaclaw.automation.policy import AutomationToolPolicy
 from athenaclaw.kernel import Kernel
 from athenaclaw.trading import (
+    AllowAllGuard,
+    RiskAction,
+    RiskContext,
+    RiskDecision,
     SubmitLimitOrderIntent,
     TradeAccountDescriptor,
-    TradeAccountSnapshot,
     TradeAccountSummary,
     TradeAuditLog,
     TradeCapabilities,
     TradeOpenOrder,
     TradeOrchestrator,
     TradeOrderSnapshot,
-    TradePlanStore,
     TradePosition,
     TradePreview,
     TradeReceipt,
@@ -163,23 +165,35 @@ class _FakeTradeAdapter:
         return "filled" if self._submitted else "submitted"
 
 
-def _make_orchestrator(tmp_path: Path) -> tuple[TradeOrchestrator, _FakeTradeAdapter]:
+class _DenyGuard:
+    """总是拒绝的 RiskGuard 测试替身 —— 验证 guard-gate 与审计日志的接线。"""
+
+    def __init__(self, reason: str = "risk denied") -> None:
+        self.reason = reason
+        self.seen: list[RiskContext] = []
+
+    def evaluate(self, ctx: RiskContext) -> RiskDecision:
+        self.seen.append(ctx)
+        return RiskDecision(RiskAction.DENY, self.reason)
+
+
+def _make_orchestrator(tmp_path: Path, *, guard=None) -> tuple[TradeOrchestrator, _FakeTradeAdapter]:
     adapter = _FakeTradeAdapter()
     orchestrator = TradeOrchestrator(
         adapter=adapter,
-        plan_store=TradePlanStore(tmp_path / "state"),
+        guard=guard or AllowAllGuard(),
         audit_log=TradeAuditLog(tmp_path / "state"),
         cancel_confirm_delays=(0.0, 0.0, 0.0),
     )
     return orchestrator, adapter
 
 
-def test_trade_orchestrator_plan_and_apply_submit_limit(tmp_path):
+def test_trade_orchestrator_execute_limit_submits_and_finalizes(tmp_path):
     orchestrator, adapter = _make_orchestrator(tmp_path)
     adapter.preview_normalized_limit_price = 174.03
     adapter.preview_normalization_reason = "fallback_us_default"
 
-    plan = orchestrator.plan_submit_limit(
+    result = orchestrator.execute_limit(
         account_ref=adapter.account_ref,
         symbol="AAPL",
         side="buy",
@@ -188,48 +202,17 @@ def test_trade_orchestrator_plan_and_apply_submit_limit(tmp_path):
     )
 
     assert adapter.preview_calls == 1
-    assert plan.normalized_intent is not None
-    assert plan.normalized_intent["limit_price"] == 174.03
-    assert "normalized from 174.034 to 174.03" in plan.warnings[0]
-    assert tuple(plan.warnings[1:]) == ("order_session=RTH",)
-
-    result = orchestrator.apply(plan.plan_id)
-
     assert result.operation == "submit_limit"
     assert result.finalized is True
     assert result.order_status is not None
     assert result.order_status.status == "filled"
     assert result.account_snapshot is not None
     assert result.account_snapshot.positions[0].quantity == 10
-    stored = orchestrator.get_plan(plan.plan_id)
-    assert stored is not None
-    assert stored["status"] == "applied"
+    assert "normalized from 174.034 to 174.03" in result.warnings[0]
+    assert tuple(result.warnings[1:]) == ("order_session=RTH",)
 
 
-def test_trade_orchestrator_rejects_expired_plan(tmp_path):
-    adapter = _FakeTradeAdapter()
-    orchestrator = TradeOrchestrator(
-        adapter=adapter,
-        plan_store=TradePlanStore(tmp_path / "state"),
-        audit_log=TradeAuditLog(tmp_path / "state"),
-        plan_ttl_sec=-1,
-    )
-
-    plan = orchestrator.plan_submit_limit(
-        account_ref=adapter.account_ref,
-        symbol="AAPL",
-        side="buy",
-        quantity=10,
-        limit_price=180,
-    )
-
-    with pytest.raises(TradeError) as exc:
-        orchestrator.apply(plan.plan_id)
-
-    assert exc.value.code == TradeErrorCode.PLAN_EXPIRED
-
-
-def test_trade_orchestrator_rejects_preview_failure_during_plan(tmp_path):
+def test_trade_orchestrator_rejects_preview_failure(tmp_path):
     orchestrator, adapter = _make_orchestrator(tmp_path)
     adapter.preview_error = TradeError(
         TradeErrorCode.ACCOUNT_MARKET_UNSUPPORTED,
@@ -237,7 +220,7 @@ def test_trade_orchestrator_rejects_preview_failure_during_plan(tmp_path):
     )
 
     with pytest.raises(TradeError) as exc:
-        orchestrator.plan_submit_limit(
+        orchestrator.execute_limit(
             account_ref=adapter.account_ref,
             symbol="AAPL",
             side="buy",
@@ -249,11 +232,78 @@ def test_trade_orchestrator_rejects_preview_failure_during_plan(tmp_path):
     assert exc.value.code == TradeErrorCode.ACCOUNT_MARKET_UNSUPPORTED
 
 
+def test_trade_orchestrator_guard_deny_blocks_submit_and_is_audited(tmp_path):
+    guard = _DenyGuard("real 大额禁止裸奔")
+    orchestrator, adapter = _make_orchestrator(tmp_path, guard=guard)
+
+    with pytest.raises(TradeError) as exc:
+        orchestrator.execute_limit(
+            account_ref=adapter.account_ref,
+            symbol="AAPL",
+            side="buy",
+            quantity=10,
+            limit_price=180,
+        )
+
+    assert exc.value.code == TradeErrorCode.PERMISSION_DENIED
+    assert exc.value.message == "real 大额禁止裸奔"
+    # DENY 时订单不应真的提交到 broker
+    assert adapter._submitted is False
+    # guard 收到的 RiskContext 携带了完整意图，供未来风控专题消费
+    assert guard.seen[-1].operation == "submit_limit"
+    assert guard.seen[-1].env == "simulate"
+    assert guard.seen[-1].automation is False
+
+
+def test_trade_orchestrator_guard_deny_blocks_cancel(tmp_path):
+    guard = _DenyGuard()
+    orchestrator, adapter = _make_orchestrator(tmp_path, guard=guard)
+    adapter._submitted = True
+    adapter.order_status_sequence = ["submitted"]
+
+    with pytest.raises(TradeError) as exc:
+        orchestrator.execute_cancel(order_ref=adapter.order_ref)
+
+    assert exc.value.code == TradeErrorCode.PERMISSION_DENIED
+    assert guard.seen[-1].operation == "cancel"
+
+
+def test_trade_orchestrator_execute_limit_passes_automation_flag_through(tmp_path):
+    guard = _DenyGuard()
+    orchestrator, adapter = _make_orchestrator(tmp_path, guard=guard)
+
+    with pytest.raises(TradeError):
+        orchestrator.execute_limit(
+            account_ref=adapter.account_ref,
+            symbol="AAPL",
+            side="buy",
+            quantity=10,
+            limit_price=180,
+            automation=True,
+        )
+
+    assert guard.seen[-1].automation is True
+
+
+def test_trade_orchestrator_execute_cancel_non_finalized_returns_warning(tmp_path):
+    orchestrator, adapter = _make_orchestrator(tmp_path)
+    adapter._submitted = True
+    adapter.order_status_sequence = ["submitted", "submitted", "submitted", "submitted"]
+
+    result = orchestrator.execute_cancel(order_ref=adapter.order_ref)
+
+    assert result.operation == "cancel"
+    assert result.finalized is False
+    assert tuple(result.warnings) == ("cancel_requested_not_finalized",)
+    assert result.order_status is not None
+    assert result.order_status.status == "submitted"
+    assert "撤单请求已发送" in result.result_summary
+
+
 def test_trade_tools_inject_active_account_snapshot(tmp_path):
     orchestrator, adapter = _make_orchestrator(tmp_path)
     kernel = Kernel(api_key="test")
     register_trade_tools(kernel, orchestrator)
-    kernel.on_confirm(lambda message: True)
 
     positions = kernel._tools["trade_account"].handler({"action": "get_positions", "account_ref": adapter.account_ref})
     assert positions["status"] == "ok"
@@ -262,7 +312,7 @@ def test_trade_tools_inject_active_account_snapshot(tmp_path):
     assert account["cash"] == 1000.0
     assert account["positions"]["AAPL"]["quantity"] == 0
 
-    plan = kernel._tools["trade_plan"].handler(
+    executed = kernel._tools["trade_execute"].handler(
         {
             "operation": "submit_limit",
             "account_ref": adapter.account_ref,
@@ -272,11 +322,10 @@ def test_trade_tools_inject_active_account_snapshot(tmp_path):
             "limit_price": 180,
         }
     )
-    applied = kernel._tools["trade_apply"].handler({"plan_id": plan["plan_id"]})
-    assert applied["status"] == "ok"
+    assert executed["status"] == "ok"
     account = kernel.data.get("account")
     assert account["positions"]["AAPL"]["quantity"] == 10
-    assert kernel.data.get("trade:last_result")["plan_id"] == plan["plan_id"]
+    assert kernel.data.get("trade:last_result")["plan_id"] == executed["plan_id"]
 
 
 def test_trade_tools_missing_refs_return_missing_error_codes(tmp_path):
@@ -290,24 +339,27 @@ def test_trade_tools_missing_refs_return_missing_error_codes(tmp_path):
     order_status = kernel._tools["trade_account"].handler({"action": "get_order_status"})
     assert order_status["error_code"] == "missing_order_ref"
 
-    cancel_plan = kernel._tools["trade_plan"].handler({"operation": "cancel"})
-    assert cancel_plan["error_code"] == "missing_order_ref"
+    cancel = kernel._tools["trade_execute"].handler({"operation": "cancel"})
+    assert cancel["error_code"] == "missing_order_ref"
 
 
-def test_trade_orchestrator_cancel_non_finalized_returns_warning(tmp_path):
-    orchestrator, adapter = _make_orchestrator(tmp_path)
-    adapter._submitted = True
-    adapter.order_status_sequence = ["submitted", "submitted", "submitted", "submitted"]
+def test_trade_tools_execute_reports_permission_denied(tmp_path):
+    guard = _DenyGuard("simulate 也不放行")
+    orchestrator, adapter = _make_orchestrator(tmp_path, guard=guard)
+    kernel = Kernel(api_key="test")
+    register_trade_tools(kernel, orchestrator)
 
-    plan = orchestrator.plan_cancel(order_ref=adapter.order_ref)
-    result = orchestrator.apply(plan.plan_id)
-
-    assert result.operation == "cancel"
-    assert result.finalized is False
-    assert tuple(result.warnings) == ("cancel_requested_not_finalized",)
-    assert result.order_status is not None
-    assert result.order_status.status == "submitted"
-    assert "撤单请求已发送" in result.result_summary
+    result = kernel._tools["trade_execute"].handler(
+        {
+            "operation": "submit_limit",
+            "account_ref": adapter.account_ref,
+            "symbol": "AAPL",
+            "side": "buy",
+            "quantity": 10,
+            "limit_price": 180,
+        }
+    )
+    assert result["error_code"] == "permission_denied"
 
 
 def test_trade_account_list_accounts_exposes_account_capabilities_and_extra(tmp_path):
@@ -334,13 +386,14 @@ def test_trade_guide_injected_when_trade_tools_registered(tmp_path):
 
     assert kernel._system_prompt is not None
     assert "<trade_tools>" in kernel._system_prompt
-    assert "trade_apply" in kernel._system_prompt
+    assert "trade_execute" in kernel._system_prompt
+    assert "自主交易操作员" in kernel._system_prompt
     assert "portfolio.json" in kernel._system_prompt
     assert "必须显式携带 account_ref 或 order_ref" in kernel._system_prompt
     assert "不能理解为当前市场状态" in kernel._system_prompt
 
 
-def test_automation_policy_denies_trade_mutations(tmp_path):
+def test_automation_policy_allows_trade_execute_but_denies_hard_blocked_tools(tmp_path):
     policy = AutomationToolPolicy(
         workspace=tmp_path / "workspace",
         task_id="task-1",
@@ -348,5 +401,30 @@ def test_automation_policy_denies_trade_mutations(tmp_path):
     )
 
     assert policy.authorize("trade_account", {"action": "list_accounts"}) is None
-    assert "禁止调用工具" in str(policy.authorize("trade_plan", {}))
-    assert "禁止调用工具" in str(policy.authorize("trade_apply", {}))
+    # 彻底自主：automation reaction 现在可以直接执行交易
+    assert policy.authorize("trade_execute", {"operation": "submit_limit"}) is None
+    assert "禁止调用工具" in str(policy.authorize("bash", {}))
+    assert "禁止调用工具" in str(policy.authorize("create_subagent", {}))
+
+
+def test_trade_execute_marks_automation_context_from_automation_tool_policy(tmp_path):
+    guard = _DenyGuard()
+    orchestrator, adapter = _make_orchestrator(tmp_path, guard=guard)
+    kernel = Kernel(api_key="test")
+    register_trade_tools(kernel, orchestrator)
+    kernel.set_tool_policy(
+        AutomationToolPolicy(workspace=tmp_path / "workspace", task_id="task-1", profile="analysis")
+    )
+
+    kernel._tools["trade_execute"].handler(
+        {
+            "operation": "submit_limit",
+            "account_ref": adapter.account_ref,
+            "symbol": "AAPL",
+            "side": "buy",
+            "quantity": 10,
+            "limit_price": 180,
+        }
+    )
+
+    assert guard.seen[-1].automation is True

@@ -132,8 +132,7 @@ Pi/bub/ampcode 的核心洞见：**read/write/edit/bash 是最小完备工具集
 | `portfolio(action, ...)` | 领域增强 | 持仓快照 | 维护结构化当前持仓，不记录交易历史 |
 | `watchlist(action, ...)` | 领域增强 | 自选快照 | 维护结构化当前自选列表，不记录历史观察日志 |
 | `trade_account(action, ...)` | 交易域 | 远端账户快照 | 读取远端 broker 账户、持仓、未完成订单、订单状态 |
-| `trade_plan(operation, ...)` | 交易域 | 执行计划 | 生成交易计划，不直接产生外部副作用 |
-| `trade_apply(plan_id)` | 交易域 | 动作执行 | 执行交易计划，执行前必须确认 |
+| `trade_execute(operation, ...)` | 交易域 | 自主执行 | 单次调用内完成校验+preview+风控裁决+下单/撤单，不经过人工确认 |
 | `compute(code)` | 领域增强 | 计算器 | 沙箱化 Python（安全版 bash） |
 | `market_ohlcv(symbol, interval, mode)` | 领域核心 | 眼睛 | 内核数据原语，支持日线/分钟/history/latest |
 | `recall(query)` | 领域增强 | 回忆 | 全文搜索 memory + notebook |
@@ -146,7 +145,7 @@ memory.write 就是 `write("memory.md", content)`，read 就是 `read("memory.md
 
 但当前持仓和具体自选列表是例外：它们需要被 Agent 稳定读取，也适合被自动化或 UI 直接消费，因此分别用 `portfolio` 维护 `portfolio.json`、用 `watchlist` 维护 `watchlist.json`，而不是继续把明细散写在 memory.md 里。
 
-远端 broker 交易又是另一类例外：它不是工作区快照维护，而是受确认与审计约束的外部动作。因此新增一层交易边界层，由 `trade_account / trade_plan / trade_apply` 暴露给 LLM，详细规格见 [trading.md](./trading.md)。
+远端 broker 交易又是另一类例外：它不是工作区快照维护，而是受审计约束的外部动作。安全边界是程序化的 `RiskGuard`，不是人类确认——Agent 是自主交易操作员。因此新增一层交易边界层，由 `trade_account / trade_execute` 暴露给 LLM，详细规格见 [trading.md](./trading.md)。
 
 read/write/edit 的覆盖范围：
 - 写研究报告 → `write("notebook/research/宁德时代/2024-01-15.md", content)`
@@ -733,8 +732,8 @@ Agent 输出任务设计稿：
 | market_ohlcv | ✅ | MarketAdapter + DataStore |
 | bash | ✅ | shell 执行 + 超时 + 进程树清理 |
 | trade_account | ✅ | 远端 broker 账户只读访问 |
-| trade_plan | ✅ | 交易计划生成 |
-| trade_apply | ✅ | 交易计划执行 |
+| trade_execute | ✅ | 自主下单/撤单，单步执行，无人工确认 |
+| market_snapshot | ✅ | 富途实时行情快照 |
 
 ### 预连通管道
 

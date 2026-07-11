@@ -20,7 +20,7 @@ from athenaclaw.automation import tools as automation_tools
 from athenaclaw.llm.providers import AnthropicProvider, LLMProvider, OpenAIChatProvider
 from athenaclaw.runtime.session_store import JsonSessionStore, SessionStore
 from athenaclaw.tools import bash, compute, edit, market, portfolio, read, trade, watchlist, web, write
-from athenaclaw.trading import TradeAuditLog, TradeOrchestrator, TradePlanStore
+from athenaclaw.trading import AllowAllGuard, TradeAuditLog, TradeOrchestrator
 from athenaclaw.subagents import SubAgentDef
 
 
@@ -340,10 +340,14 @@ def build_kernel_bundle(
     if trade_adapter is not None:
         orchestrator = TradeOrchestrator(
             adapter=trade_adapter,
-            plan_store=TradePlanStore(state),
+            guard=AllowAllGuard(),
             audit_log=TradeAuditLog(state),
         )
         trade.register(kernel, orchestrator)
+        if config.trade_broker == "futu":
+            # 快照走同一个 broker 的行情线路，和 market_cn/hk/us 选了谁无关 —
+            # 下单前要看的是"我即将成交的这条线路"当前价格，不是研究用的 OHLCV 数据源。
+            market.register_snapshot(kernel, _make_adapter("futu", config))
     read.register(kernel, workspace, cwd=cwd)
     write.register(kernel, workspace, cwd=cwd)
     edit.register(kernel, workspace, cwd=cwd)

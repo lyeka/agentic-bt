@@ -1,7 +1,7 @@
 """
 [INPUT]: athenaclaw.kernel, athenaclaw.trading
 [OUTPUT]: register()
-[POS]: 交易工具层；暴露 trade_account/trade_plan/trade_apply 给 LLM
+[POS]: 交易工具层；暴露 trade_account（只读）/trade_execute（下单执行）给 LLM
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -64,46 +64,33 @@ def register(kernel: object, orchestrator: object) -> None:
             return error_payload(exc)
         return {"error": "未知 action，可用值: list_accounts/get_positions/get_open_orders/get_order_status/get_summary"}
 
-    def trade_plan_handler(args: dict[str, Any]) -> dict[str, Any]:
+    def trade_execute_handler(args: dict[str, Any]) -> dict[str, Any]:
         operation = str(args.get("operation") or "").strip().lower()
+        # automation 单点判定：本次调用是否来自无人值守 reaction，交给 RiskContext.automation，
+        # 供未来风控专题识别“automation + real”这个最高风险组合。
+        automation = bool(getattr(getattr(kernel, "_tool_policy", None), "automation", False))
         try:
             if operation == "submit_limit":
                 account_ref = str(args.get("account_ref") or "").strip()
                 if not account_ref:
                     return _missing_account_ref()
-                plan = orchestrator.plan_submit_limit(
+                result = orchestrator.execute_limit(
                     account_ref=account_ref,
                     symbol=str(args.get("symbol") or "").strip(),
                     side=str(args.get("side") or "").strip(),
                     quantity=float(args.get("quantity")),
                     limit_price=float(args.get("limit_price")),
+                    automation=automation,
                 )
-                return {"status": "ok", **plan.to_dict()}
-            if operation == "cancel":
+            elif operation == "cancel":
                 order_ref = str(args.get("order_ref") or "").strip()
                 if not order_ref:
                     return _missing_order_ref()
-                plan = orchestrator.plan_cancel(order_ref=order_ref)
-                return {"status": "ok", **plan.to_dict()}
+                result = orchestrator.execute_cancel(order_ref=order_ref, automation=automation)
+            else:
+                return {"error": "未知 operation，可用值: submit_limit/cancel"}
         except (TypeError, ValueError):
-            return {"error": "trade_plan 参数不合法"}
-        except TradeError as exc:
-            return error_payload(exc)
-        return {"error": "未知 operation，可用值: submit_limit/cancel"}
-
-    def trade_apply_handler(args: dict[str, Any]) -> dict[str, Any]:
-        plan_id = str(args.get("plan_id") or "").strip()
-        if not plan_id:
-            return {"error": "缺少参数: plan_id"}
-        record = orchestrator.get_plan(plan_id)
-        if record is None:
-            return {"error": f"未找到 plan: {plan_id}", "error_code": "plan_not_found"}
-        plan = record["plan"]
-        confirm_text = str(plan.get("confirm_text") or f"确认执行 {plan_id} 吗？")
-        if not kernel.request_confirm(confirm_text):
-            return {"status": "cancelled", "plan_id": plan_id, "message": "用户取消确认"}
-        try:
-            result = orchestrator.apply(plan_id)
+            return {"error": "trade_execute 参数不合法"}
         except TradeError as exc:
             return error_payload(exc)
 
@@ -144,12 +131,15 @@ def register(kernel: object, orchestrator: object) -> None:
     )
 
     kernel.tool(
-        name="trade_plan",
+        name="trade_execute",
         description=(
-            "创建交易执行计划，不直接产生外部副作用。只支持股票/ETF 的 LIMIT 限价单与撤单。"
-            "先调用 trade_plan，再调用 trade_apply。不要跳过 plan。"
-            "plan 返回的 plan_id 是一次性短期令牌；不要伪造或猜测。"
-            "submit_limit 必须显式提供 account_ref，cancel 必须显式提供 order_ref。"
+            "直接对远端 broker 账户执行交易动作：提交股票/ETF 限价单，或撤销未完成订单。"
+            "你是自主交易操作员：本工具一步下单/撤单，不经过人工确认，调用即视为你已完成决策判断。"
+            "执行前会经过风控裁决；被拒绝时返回 error_code=permission_denied。"
+            "submit_limit 必须显式提供 account_ref/symbol/side/quantity/limit_price；"
+            "cancel 必须显式提供 order_ref。account_ref/order_ref 是系统返回的 opaque 引用，只能传递，不能猜测或拼接。"
+            "执行成功后会自动刷新订单当前状态；若订单已部分或全部成交，会刷新当前活动账户快照。"
+            "status=ok 只表示工具执行成功，不表示订单动作已进入终态；请结合 finalized 与 order_status 判断。"
         ),
         parameters={
             "type": "object",
@@ -164,23 +154,5 @@ def register(kernel: object, orchestrator: object) -> None:
             },
             "required": ["operation"],
         },
-        handler=trade_plan_handler,
-    )
-
-    kernel.tool(
-        name="trade_apply",
-        description=(
-            "执行 trade_plan 生成的计划。只接受 plan_id，执行前会请求用户确认。"
-            "不要把原始下单参数直接传给 trade_apply。"
-            "执行成功后会自动刷新订单当前状态；若订单已部分或全部成交，会刷新当前活动账户快照。"
-            "status=ok 只表示工具执行成功，不表示订单动作已进入终态；请结合 finalized 与 order_status 判断。"
-        ),
-        parameters={
-            "type": "object",
-            "properties": {
-                "plan_id": {"type": "string", "description": "trade_plan 返回的一次性 plan_id"},
-            },
-            "required": ["plan_id"],
-        },
-        handler=trade_apply_handler,
+        handler=trade_execute_handler,
     )

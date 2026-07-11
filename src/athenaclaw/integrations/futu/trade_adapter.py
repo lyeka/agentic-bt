@@ -429,7 +429,7 @@ class FutuTradeAdapter:
         if ret != futu.RET_OK:
             text = str(data)
             code = _translate_error_code(text, op=op)
-            raise TradeError(code, f"{op} 失败: {text}")
+            raise TradeError(code, _error_message(code, op=op, raw=text))
         if isinstance(data, pd.DataFrame):
             return data
         if allow_empty:
@@ -615,6 +615,17 @@ def _translate_error_code(text: str, *, op: str) -> TradeErrorCode:
     if op == "acctradinginfo_query":
         return TradeErrorCode.PREVIEW_REJECTED
     return TradeErrorCode.PROVIDER_ERROR
+
+
+def _error_message(code: TradeErrorCode, *, op: str, raw: str) -> str:
+    if code is TradeErrorCode.TRADE_LOCKED:
+        # 本系统零密码：REAL 账户解锁只能在 Futu OpenD 客户端手工完成，代码侧不持有、
+        # 不传递、不代为调用 unlock_trade。这里只负责把"去哪解锁"说清楚。
+        return (
+            f"{op} 失败: 交易账户未解锁（{raw}）。"
+            "请在 Futu OpenD 客户端手工解锁交易，本系统不持有交易密码、不会自动解锁。"
+        )
+    return f"{op} 失败: {raw}"
 
 
 def _snap_to_increment(value: Decimal, increment: Decimal) -> Decimal:

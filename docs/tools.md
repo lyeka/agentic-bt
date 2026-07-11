@@ -13,8 +13,8 @@
 | `portfolio` | 维护结构化当前持仓快照 `portfolio.json` |
 | `watchlist` | 维护结构化自选列表快照 `watchlist.json` |
 | `trade_account` | 读取远端 broker 账户、持仓、未完成订单、订单状态 |
-| `trade_plan` | 生成交易执行计划，不直接产生外部副作用 |
-| `trade_apply` | 执行 `trade_plan` 生成的计划 |
+| `trade_execute` | 自主交易执行：单次调用内完成校验+preview+风控裁决+下单/撤单，不经过人工确认 |
+| `market_snapshot` | 富途实时行情快照（last/bid/ask），区别于 `market_ohlcv` 的 K 线 |
 | `compute` | 在沙箱中对已加载 OHLCV 做 Python 分析 |
 | `read` | 读工作区文件 |
 | `write` | 写工作区文件 |
@@ -22,7 +22,7 @@
 | `bash` | 执行 shell 命令（按权限控制） |
 | `web_search` / `web_fetch` | 可选 Web 搜索与抓取 |
 
-其中最容易用错的是 `portfolio`、`watchlist`、`trade_account`、`trade_plan`、`trade_apply`、`market_ohlcv` 和 `compute`。
+其中最容易用错的是 `portfolio`、`watchlist`、`trade_account`、`trade_execute`、`market_ohlcv` 和 `compute`。
 
 ## portfolio
 
@@ -114,17 +114,18 @@
 `memory.md` 适合记录高层关注方向和长期偏好。
 具体自选 symbol 清单、观察理由和加入时间需要结构化读取，因此单独维护在 `watchlist.json`。
 
-## trade_account / trade_plan / trade_apply
+## trade_account / trade_execute
 
 ### 核心语义
 
-这三者共同组成远端 broker 交易闭环：
+这两者共同组成远端 broker 交易闭环，自主交易操作员范式——中间不经过人工确认：
 
-- `trade_account`：读取远端账户状态
-- `trade_plan`：创建可确认、可审计的执行计划
-- `trade_apply`：执行计划
+- `trade_account`：读取远端账户状态（只读）
+- `trade_execute`：唯一执行入口，`operation=submit_limit|cancel`，单次调用内完成校验+preview+`RiskGuard.evaluate`+下单/撤单+状态回读
 
 它们不是 `portfolio` 的替代物，也不会自动维护 `portfolio.json`。
+
+安全边界是程序化的 `RiskGuard`（这期 `AllowAllGuard` 占位，恒 ALLOW，真实风控是独立专题），不是人类确认——详见 [trading.md](./trading.md) §6。
 
 ### V1 边界
 
@@ -147,17 +148,16 @@
 ### 正确用法
 
 1. 先 `trade_account.list_accounts`
-2. 再 `trade_plan.submit_limit` 或 `trade_plan.cancel`
-3. 最后 `trade_apply`
+2. 直接 `trade_execute(operation="submit_limit", ...)` 或 `trade_execute(operation="cancel", ...)`
 
-不能跳过 `trade_plan` 直接执行。
+一次调用即完成下单/撤单，没有二段式确认步骤。
 
 显式参数规则：
 
 - `trade_account.get_positions/get_summary/get_open_orders` 必须显式传 `account_ref`
 - `trade_account.get_order_status` 必须显式传 `order_ref`
-- `trade_plan.submit_limit` 必须显式传 `account_ref`
-- `trade_plan.cancel` 必须显式传 `order_ref`
+- `trade_execute(operation="submit_limit")` 必须显式传 `account_ref`
+- `trade_execute(operation="cancel")` 必须显式传 `order_ref`
 - 不会自动承接最近账户、最近订单，也不会返回 suggestion
 
 ### 账户发现
@@ -184,19 +184,16 @@
 `trade_account.get_positions` 成功后，会把该账户快照写入 `Kernel.data["account"]`。  
 后续 `compute` 读取到的 `account/cash/equity/positions` 就来自这个当前活动账户快照。
 
-### 计划与执行返回
+### 执行返回
 
-`trade_plan.submit_limit` 返回的 plan 除了 `plan_id` 外，还会返回：
+`trade_execute(operation="submit_limit")` 一次调用内完成校验+preview+风控裁决+下单+状态回读，返回除了 `order_status` 外，还会返回：
 
-- `normalized_intent`
-
-其中 `normalized_intent.limit_price` 是后续 `trade_apply` 唯一允许执行的价格。  
-如果 provider 对输入价格做了规范化，plan 的 `warnings` 里会明确写出原始价格和规范化后的价格。
-
-`trade_apply` 返回除了 `order_status` 外，还会返回：
-
+- `normalized_intent`：如果 provider 对输入价格做了规范化，`warnings` 里会明确写出原始价格和规范化后的价格
 - `finalized`
 - `warnings`
+- `plan_id`：语义已从"待确认计划 id"改为一次性执行 id，纯审计用途
+
+`trade_execute(operation="cancel")` 返回同样包含 `order_status`/`finalized`/`warnings`。
 
 语义是：
 

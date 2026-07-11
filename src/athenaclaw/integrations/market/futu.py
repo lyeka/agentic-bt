@@ -1,7 +1,8 @@
 """
 [INPUT]: pandas, datetime, athenaclaw.integrations.futu.*, athenaclaw.tools.market.schema
-[OUTPUT]: FutuAdapter — Futu OpenD Quote OHLCV 适配器
-[POS]: MarketAdapter 实现，通过 Futu request_history_kline/get_cur_kline 获取 CN/HK/US OHLCV
+[OUTPUT]: FutuAdapter — Futu OpenD Quote OHLCV + 实时快照适配器
+[POS]: MarketAdapter 实现，通过 Futu request_history_kline/get_cur_kline 获取 CN/HK/US OHLCV；
+       同时实现 SnapshotAdapter.snapshot，经 get_market_snapshot 提供下单前的实时快照/报价
 [PROTOCOL]: 变更时更新此头部，然后检查 CLAUDE.md
 """
 
@@ -128,6 +129,19 @@ class FutuAdapter:
         df = _ensure_frame(ret, data, futu=futu, op="get_cur_kline")
         return _normalize_kline_frame(df).tail(1).reset_index(drop=True)
 
+    def snapshot(self, symbols: list[str]) -> list[dict[str, Any]]:
+        """一批 symbol 的实时快照 — 不需要订阅，直接一次调用拿当前盘口。"""
+        try:
+            futu = _load_futu()
+            quote_ctx = self._manager.quote_context()
+            codes = [to_futu_code(symbol) for symbol in symbols]
+            ret, data = quote_ctx.get_market_snapshot(codes)
+            if ret != futu.RET_OK:
+                raise ValueError(f"get_market_snapshot 失败: {data}")
+            return _normalize_snapshot_frame(data)
+        except Exception as exc:
+            raise ValueError(_friendly_error_message(exc)) from exc
+
 
 def _default_window(query: MarketQuery) -> tuple[str | None, str | None]:
     if query.start_dt is not None or query.end_dt is not None:
@@ -168,6 +182,42 @@ def _normalize_kline_frame(frame: pd.DataFrame) -> pd.DataFrame:
 
 def _empty_ohlcv_frame() -> pd.DataFrame:
     return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume"])
+
+
+def _normalize_snapshot_frame(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    if frame is None or frame.empty:
+        return []
+    records: list[dict[str, Any]] = []
+    for _, row in frame.iterrows():
+        records.append({
+            "symbol": str(row.get("code")),
+            "name": row.get("name"),
+            "last_price": _to_float(row.get("last_price")),
+            "open_price": _to_float(row.get("open_price")),
+            "high_price": _to_float(row.get("high_price")),
+            "low_price": _to_float(row.get("low_price")),
+            "prev_close_price": _to_float(row.get("prev_close_price")),
+            "volume": _to_float(row.get("volume")),
+            "turnover": _to_float(row.get("turnover")),
+            "turnover_rate": _to_float(row.get("turnover_rate")),
+            "bid_price": _to_float(row.get("bid_price")),
+            "ask_price": _to_float(row.get("ask_price")),
+            "bid_vol": _to_float(row.get("bid_vol")),
+            "ask_vol": _to_float(row.get("ask_vol")),
+            "price_spread": _to_float(row.get("price_spread")),
+            "suspension": bool(row.get("suspension")) if pd.notna(row.get("suspension")) else None,
+            "update_time": row.get("update_time") if pd.notna(row.get("update_time")) else None,
+        })
+    return records
+
+
+def _to_float(value: Any) -> float | None:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _ensure_frame(ret: int, data: Any, *, futu, op: str) -> pd.DataFrame:

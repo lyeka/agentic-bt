@@ -55,6 +55,8 @@ class _FakeQuoteContext:
         self.history_calls: list[dict] = []
         self.latest_calls: list[dict] = []
         self.subscribe_calls: list[dict] = []
+        self.snapshot_response: tuple[int, object] = (_FakeFutu.RET_OK, pd.DataFrame())
+        self.snapshot_calls: list[list[str]] = []
 
     def request_history_kline(self, **kwargs):
         self.history_calls.append(kwargs)
@@ -73,6 +75,10 @@ class _FakeQuoteContext:
     def get_cur_kline(self, **kwargs):
         self.latest_calls.append(kwargs)
         return self.latest_response
+
+    def get_market_snapshot(self, code_list):
+        self.snapshot_calls.append(list(code_list))
+        return self.snapshot_response
 
 
 def _make_adapter(monkeypatch, quote_ctx: _FakeQuoteContext) -> FutuAdapter:
@@ -222,3 +228,65 @@ def test_futu_history_permission_error_is_translated(monkeypatch):
 def test_market_query_uses_hk_timezone():
     query = build_market_query(symbol="00700.HK", interval="1m", mode="history")
     assert query.timezone == "Asia/Hong_Kong"
+
+
+def test_futu_snapshot_normalizes_fields_without_subscription(monkeypatch):
+    quote_ctx = _FakeQuoteContext()
+    quote_ctx.snapshot_response = (
+        _FakeFutu.RET_OK,
+        pd.DataFrame(
+            [
+                {
+                    "code": "US.AAPL",
+                    "name": "Apple Inc",
+                    "last_price": 180.12,
+                    "open_price": 178.0,
+                    "high_price": 181.0,
+                    "low_price": 177.5,
+                    "prev_close_price": 179.0,
+                    "volume": 1_200_000,
+                    "turnover": 216_000_000.0,
+                    "turnover_rate": 0.012,
+                    "bid_price": 180.10,
+                    "ask_price": 180.14,
+                    "bid_vol": 100,
+                    "ask_vol": 200,
+                    "price_spread": 0.04,
+                    "suspension": False,
+                    "update_time": "2026-07-11 21:59:59",
+                }
+            ]
+        ),
+    )
+    adapter = _make_adapter(monkeypatch, quote_ctx)
+
+    result = adapter.snapshot(["AAPL"])
+
+    assert quote_ctx.snapshot_calls == [["US.AAPL"]]
+    assert len(result) == 1
+    row = result[0]
+    assert row["symbol"] == "US.AAPL"
+    assert row["last_price"] == 180.12
+    assert row["bid_price"] == 180.10
+    assert row["ask_price"] == 180.14
+    assert row["suspension"] is False
+    assert row["update_time"] == "2026-07-11 21:59:59"
+
+
+def test_futu_snapshot_empty_frame_returns_empty_list(monkeypatch):
+    quote_ctx = _FakeQuoteContext()
+    quote_ctx.snapshot_response = (_FakeFutu.RET_OK, pd.DataFrame())
+    adapter = _make_adapter(monkeypatch, quote_ctx)
+
+    result = adapter.snapshot(["AAPL"])
+
+    assert result == []
+
+
+def test_futu_snapshot_provider_error_is_translated(monkeypatch):
+    quote_ctx = _FakeQuoteContext()
+    quote_ctx.snapshot_response = (1, "没有权限或者额度不足")
+    adapter = _make_adapter(monkeypatch, quote_ctx)
+
+    with pytest.raises(ValueError):
+        adapter.snapshot(["AAPL"])

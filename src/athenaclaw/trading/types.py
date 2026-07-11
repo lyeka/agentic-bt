@@ -226,31 +226,6 @@ class TradePreview:
 
 
 @dataclass(frozen=True)
-class TradePlan:
-    plan_id: str
-    operation: str
-    plan_summary: str
-    confirm_text: str
-    warnings: tuple[str, ...]
-    created_at: str
-    expires_at: str
-    normalized_intent: dict[str, Any] | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "plan_id": self.plan_id,
-            "operation": self.operation,
-            "plan_summary": self.plan_summary,
-            "confirm_text": self.confirm_text,
-            "warnings": list(self.warnings),
-            "created_at": self.created_at,
-            "expires_at": self.expires_at,
-            "normalized_intent": self.normalized_intent,
-            "requires_confirmation": True,
-        }
-
-
-@dataclass(frozen=True)
 class TradeReceipt:
     order_ref: str
     status: str
